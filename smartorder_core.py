@@ -57,7 +57,8 @@ CHANNELS = {
             "store_name":  ["센터명"],
             "prod_code":   ["상품 코드", "상품코드"],
             "prod_name":   ["상품명"],
-            "qty":         ["총수량", "수량"],
+            # CU 수량 = 발주단위수량(라벨 1장 = 1발주단위). 총수량은 수정배수가 곱해진 값이라 라벨 수량이 아님
+            "qty":         ["발주단위수량", "총수량", "수량"],
             "date":        ["센터납품 예정일자", "예정일자", "고객인도일"],
         },
     },
@@ -249,15 +250,22 @@ def _find_header(rows, cfg):
         hdr = [norm(x) for x in rows[r]]
         idx = {}
         for key, cands in want.items():
-            # exact 우선, 없으면 부분일치
+            # 후보를 '적힌 순서(우선순위)'대로 찾는다 — 컬럼 순서에 끌려가면 안 됨.
+            # (예: CU는 총수량이 발주단위수량보다 앞 컬럼이지만, 수량은 발주단위수량이 정답)
             found = None
-            for i, h in enumerate(hdr):
-                if h in cands:
-                    found = i; break
-            if found is None:
+            for cand in cands:                       # 1) exact
                 for i, h in enumerate(hdr):
-                    if any(c in h for c in cands):
+                    if h == cand:
                         found = i; break
+                if found is not None:
+                    break
+            if found is None:
+                for cand in cands:                   # 2) 부분일치
+                    for i, h in enumerate(hdr):
+                        if cand in h:
+                            found = i; break
+                    if found is not None:
+                        break
             if found is not None:
                 idx[key] = found
         hits = len(idx)
