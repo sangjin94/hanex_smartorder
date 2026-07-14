@@ -51,7 +51,7 @@
     {% if unmapped_products %}
     <h2 style="margin-top:18px">미매핑 상품 ({{ unmapped_products|length }})</h2>
     <table>
-      <tr><th style="width:26%">상품코드</th><th style="width:34%">상품명(원본)</th><th>대표상품명 지정</th></tr>
+      <tr><th style="width:26%">상품코드</th><th style="width:34%">화주상품명(원본·라벨표시)</th><th>대표=한익스상품명(표지표시) 지정</th></tr>
       {% for code,nm in unmapped_products.items() %}
       <tr>
         <td><code class="k">{{ code }}</code></td>

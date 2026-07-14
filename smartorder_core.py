@@ -39,7 +39,7 @@ CHANNELS = {
         "center_label": "CU센터",
         "center_master": "center_cu.json",
         "center_key": "code",       # 센터코드로 매핑
-        "label_product": "raw",     # 라벨 상품명 = 원본(기존 동일)
+        "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
         "total_title": "대월직매장(CU)스마트오더 TOTAL 수량",
         "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
         "row_h": 62.4,
@@ -88,7 +88,7 @@ CHANNELS = {
         "center_label": "E-24센터",
         "center_master": "center_e24.json",
         "center_key": "name",       # E24는 입고센터명으로 매핑(코드 없음)
-        "label_product": "rep",     # 라벨 상품명 = 대표(기존 동일)
+        "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
         "total_title": "대월직매장(E-24)스마트오더 TOTAL 수량",
         "col_width": {"A": 47.8, "B": 110.7, "C": 41.7, "D": 8.7},
         "row_h": 83.4,
@@ -278,6 +278,7 @@ def process(records, channel):
         rep = product_master.get(rec["prod_code"], "")
         if not rep and rec["prod_code"]:
             unmapped_products[rec["prod_code"]] = rec["prod_name"]
+        # 부착양식 라벨 = 화주상품명(원본 제품명), 표지/집계 = 대표(한익스상품명)
         label_prod = rec["prod_name"] if cfg["label_product"] == "raw" else (rep or rec["prod_name"])
         rows.append({
             "센터": rec["center_name"],
@@ -285,9 +286,9 @@ def process(records, channel):
             "점포코드": rec["store_code"],
             "점포명": rec["store_name"],
             "거점센터": hub,
-            "상품명": label_prod,          # 라벨 표시용
+            "상품명": label_prod,          # 라벨 표시용 = 화주상품명
             "수량": rec["qty"],
-            "대표": rep or rec["prod_name"],
+            "대표": rep or rec["prod_name"],   # 표지 표시용 = 한익스상품명(대표)
             "_ckey": ckeyval,
             "_pcode": rec["prod_code"],
         })

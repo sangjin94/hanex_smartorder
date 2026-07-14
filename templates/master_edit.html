@@ -30,7 +30,7 @@
 
   <table style="margin-top:14px">
     <tr><th style="width:28%">{{ '입고센터명' if which=='center_e24' else ('상품코드' if d.kind=='product' else '센터코드') }}</th>
-        <th>{{ '대표상품명' if d.kind=='product' else '거점센터' }}</th>
+        <th>{{ '대표=한익스상품명' if d.kind=='product' else '거점센터' }}</th>
         <th style="width:150px">관리</th></tr>
     {% for k,v in items %}
     <tr>

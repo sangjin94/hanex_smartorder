@@ -182,7 +182,7 @@ MASTER_DEFS = {
     "center_cu":  {"file": "center_cu.json",  "title": "CU 센터 (센터코드→거점센터)", "kind": "center"},
     "center_gs":  {"file": "center_gs.json",  "title": "GS 센터 (센터코드→거점센터)", "kind": "center"},
     "center_e24": {"file": "center_e24.json", "title": "이마트24 센터 (입고센터명→거점센터)", "kind": "center"},
-    "product":    {"file": "product.json",    "title": "상품 (상품코드→대표상품명)", "kind": "product"},
+    "product":    {"file": "product.json",    "title": "상품 (상품코드→대표=한익스상품명)", "kind": "product"},
 }
 
 @app.route("/masters")
