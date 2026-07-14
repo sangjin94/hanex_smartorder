@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# 런타임/임시
+server.log
+bootstrap_log.txt
+dl_*.xlsx
+gen_*.xlsx
+*.tmp
+uploads/
+
+# 참고 원본(엑셀) — 저장소에 올리지 않음
+ref/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

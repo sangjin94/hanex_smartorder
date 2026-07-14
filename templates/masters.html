@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}마스터 관리{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>마스터 관리</h1>
+  <div class="sub">코드 기반 매핑 테이블입니다. 센터코드가 바뀌지 않는 한 유지되므로 명칭 변동에 강합니다.</div>
+  <div class="grid">
+    {% set colors = {'center_cu':'#7c3aed','center_gs':'#0891b2','center_e24':'#ea580c','product':'#1d4ed8'} %}
+    {% for key,d in defs.items() %}
+    <a class="chcard" style="background:linear-gradient(135deg,{{colors[key]}},{{colors[key]}}cc)"
+       href="{{ url_for('master_edit', which=key) }}">
+      <div style="font-size:15px;font-weight:700;opacity:.95">{{ d.title }}</div>
+      <div class="big" style="margin-top:8px">{{ counts[key] }}</div>
+      <div class="meta">등록 항목</div>
+      <div class="go">→</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

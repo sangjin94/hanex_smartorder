@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1>{{ d.title }}</h1>
+    <a href="{{ url_for('masters') }}" class="muted">← 마스터목록</a>
+  </div>
+  <div class="sub">전체 {{ total }}개{% if q %} · '<b>{{ q }}</b>' 검색 결과 {{ items|length }}개{% endif %}</div>
+
+  <!-- 추가 -->
+  <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="margin-top:16px;gap:8px">
+    <input type="hidden" name="action" value="add">
+    <input type="text" name="key" placeholder="{{ '입고센터명' if which=='center_e24' else ('상품코드' if d.kind=='product' else '센터코드') }}" style="max-width:220px" required>
+    <span style="color:var(--sub)">→</span>
+    {% if d.kind=='center' %}
+      <input list="hublist" type="text" name="value" placeholder="거점센터" style="max-width:240px" required>
+    {% else %}
+      <input type="text" name="value" placeholder="대표상품명" style="max-width:320px" required>
+    {% endif %}
+    <button class="btn ok" type="submit">추가</button>
+  </form>
+
+  <!-- 검색 -->
+  <form method="get" class="row" style="margin-top:10px;gap:8px">
+    <input type="text" name="q" value="{{ q }}" placeholder="코드/값 검색" style="max-width:280px">
+    <button class="btn gray" type="submit">검색</button>
+    {% if q %}<a class="muted" href="{{ url_for('master_edit', which=which) }}">전체보기</a>{% endif %}
+  </form>
+
+  <table style="margin-top:14px">
+    <tr><th style="width:28%">{{ '입고센터명' if which=='center_e24' else ('상품코드' if d.kind=='product' else '센터코드') }}</th>
+        <th>{{ '대표상품명' if d.kind=='product' else '거점센터' }}</th>
+        <th style="width:150px">관리</th></tr>
+    {% for k,v in items %}
+    <tr>
+      <td><code class="k">{{ k }}</code></td>
+      <td>
+        <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="gap:6px">
+          <input type="hidden" name="action" value="update">
+          <input type="hidden" name="key" value="{{ k }}">
+          <input type="hidden" name="q" value="{{ q }}">
+          {% if d.kind=='center' %}
+            <input list="hublist" type="text" name="value" value="{{ v }}" style="max-width:260px">
+          {% else %}
+            <input type="text" name="value" value="{{ v }}">
+          {% endif %}
+          <button class="btn gray" type="submit" style="padding:7px 12px">저장</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('master_save', which=which) }}"
+              onsubmit="return confirm('삭제하시겠어요? {{ k }}')">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="key" value="{{ k }}">
+          <input type="hidden" name="q" value="{{ q }}">
+          <button class="btn" type="submit" style="background:#fee2e2;color:#b91c1c;padding:7px 12px">삭제</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not items %}
+    <tr><td colspan="3" class="muted" style="text-align:center;padding:24px">항목이 없습니다.</td></tr>
+    {% endif %}
+  </table>
+</div>
+<datalist id="hublist">{% for h in hubs %}<option value="{{ h }}">{% endfor %}</datalist>
+{% endblock %}

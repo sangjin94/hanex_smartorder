@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.name }} 업로드{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1><span class="pill {{ch}}">{{ cfg.name }}</span> RAW 업로드</h1>
+    <a href="{{ url_for('index') }}" class="muted">← 채널선택</a>
+  </div>
+  <div class="sub">{{ cfg.name }} 스마트오더 RAW 파일을 올리면 라벨을 생성합니다.
+    {% if cfg.center_key=='code' %}(센터코드로 거점 매핑){% else %}(입고센터명으로 거점 매핑){% endif %}</div>
+
+  <form method="post" enctype="multipart/form-data" id="frm" style="margin-top:18px">
+    <label class="drop" id="drop">
+      <input type="file" name="file" id="file" accept=".xlsx,.xls" style="display:none">
+      <div style="font-size:40px">📄</div>
+      <div style="font-size:16px;font-weight:600;margin-top:6px" id="dropname">여기에 파일을 끌어놓거나 클릭</div>
+      <div class="muted" style="margin-top:4px">.xlsx / .xls · 최대 40MB</div>
+    </label>
+    <div class="row" style="margin-top:16px">
+      <button class="btn big" type="submit">라벨 생성 →</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h2 class="muted" style="font-size:14px">인식하는 RAW 컬럼</h2>
+  <div class="muted" style="font-size:13px">
+    센터: <code class="k">{{ cfg.raw.center_name|join(' / ') }}</code>
+    {% if cfg.center_key=='code' %}· 센터코드: <code class="k">{{ cfg.raw.center_code|join(' / ') }}</code>{% endif %}
+    · 상품코드: <code class="k">{{ cfg.raw.prod_code|join(' / ') }}</code>
+    · 수량: <code class="k">{{ cfg.raw.qty|join(' / ') }}</code>
+  </div>
+</div>
+
+<script>
+  const drop=document.getElementById('drop'),file=document.getElementById('file'),
+        name=document.getElementById('dropname');
+  file.onchange=()=>{ if(file.files[0]) name.textContent=file.files[0].name; };
+  ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',ev=>{ file.files=ev.dataTransfer.files; if(file.files[0]) name.textContent=file.files[0].name; });
+</script>
+{% endblock %}

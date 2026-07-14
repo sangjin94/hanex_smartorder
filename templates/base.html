@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}스마트오더 라벨{% endblock %} · 한익스프레스</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#ffffff; --line:#e2e8f0; --ink:#0f172a; --sub:#64748b;
+    --brand:#1d4ed8; --brand2:#2563eb; --ok:#059669; --warn:#d97706; --err:#dc2626;
+    --cu:#7c3aed; --gs:#0891b2; --e24:#ea580c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"맑은 고딕","Malgun Gothic",system-ui,sans-serif;
+    background:#f1f5f9;color:var(--ink);line-height:1.5}
+  a{color:var(--brand);text-decoration:none}
+  header.top{background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#fff;padding:14px 22px;
+    display:flex;align-items:center;gap:14px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+  header.top .logo{font-weight:800;font-size:18px;letter-spacing:-.3px}
+  header.top .logo small{opacity:.75;font-weight:500;font-size:12px;margin-left:6px}
+  header.top nav{margin-left:auto;display:flex;gap:6px}
+  header.top nav a{color:#dbeafe;padding:7px 13px;border-radius:8px;font-size:14px}
+  header.top nav a:hover,header.top nav a.active{background:rgba(255,255,255,.15);color:#fff}
+  .wrap{max-width:1040px;margin:26px auto;padding:0 18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;
+    box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  h1{font-size:22px;margin:0 0 4px}
+  h2{font-size:17px;margin:0 0 12px}
+  .sub{color:var(--sub);font-size:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:18px}
+  .chcard{display:block;border-radius:14px;padding:20px;color:#fff;position:relative;overflow:hidden;
+    transition:transform .12s ease, box-shadow .12s;box-shadow:0 4px 14px rgba(2,6,23,.12)}
+  .chcard:hover{transform:translateY(-3px);box-shadow:0 10px 22px rgba(2,6,23,.2)}
+  .chcard .big{font-size:26px;font-weight:800}
+  .chcard .meta{opacity:.9;font-size:13px;margin-top:10px}
+  .chcard .go{position:absolute;right:16px;bottom:14px;font-size:22px;opacity:.85}
+  .btn{display:inline-flex;align-items:center;gap:7px;background:var(--brand);color:#fff;border:0;
+    padding:11px 18px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer}
+  .btn:hover{background:var(--brand2)}
+  .btn.gray{background:#e2e8f0;color:#0f172a}
+  .btn.gray:hover{background:#cbd5e1}
+  .btn.ok{background:var(--ok)}
+  .btn.big{padding:14px 26px;font-size:16px}
+  .flash{padding:11px 15px;border-radius:10px;margin-bottom:12px;font-size:14px}
+  .flash.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+  .flash.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left}
+  th{background:#f8fafc;color:var(--sub);font-weight:600;font-size:13px}
+  input[type=text],select{padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:14px;
+    font-family:inherit;width:100%}
+  input:focus,select:focus{outline:2px solid #bfdbfe;border-color:var(--brand)}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.cu{background:#f3e8ff;color:#6d28d9}
+  .pill.gs{background:#cffafe;color:#0e7490}
+  .pill.e24{background:#ffedd5;color:#c2410c}
+  .stat{display:flex;gap:22px;flex-wrap:wrap;margin:6px 0 2px}
+  .stat .n{font-size:28px;font-weight:800}
+  .stat .l{font-size:13px;color:var(--sub)}
+  .drop{border:2px dashed #cbd5e1;border-radius:14px;padding:34px;text-align:center;background:#f8fafc;
+    cursor:pointer;transition:.15s}
+  .drop.drag{border-color:var(--brand);background:#eff6ff}
+  .muted{color:var(--sub);font-size:13px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .warnbox{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px;margin-top:16px}
+  .okbox{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin-top:16px}
+  code.k{background:#f1f5f9;padding:2px 7px;border-radius:6px;font-size:13px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo">🏷️ 스마트오더 라벨 <small>한익스프레스 · 대월직매장</small></div>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint=='index' }}">라벨생성</a>
+    <a href="{{ url_for('masters') }}" class="{{ 'active' if request.endpoint in ['masters','master_edit'] }}">마스터관리</a>
+  </nav>
+</header>
+<div class="wrap">
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat,msg in msgs %}
+      <div class="flash {{ 'ok' if cat=='ok' else 'error' }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</div>
+</body>
+</html>

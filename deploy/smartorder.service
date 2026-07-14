@@ -1,0 +1,16 @@
+[Unit]
+Description=HANEX SmartOrder Label (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/hanex_smartorder
+Environment=SMARTORDER_MASTERS=/home/ubuntu/hanex_smartorder_data/masters
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/hanex_smartorder/venv/bin/gunicorn -w 2 -b 127.0.0.1:8090 --timeout 180 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
