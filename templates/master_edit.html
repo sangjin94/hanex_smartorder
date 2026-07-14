@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ d.title }}{% endblock %}
 {% block body %}
+{% set is_prod = d.kind=='product' %}
 <div class="card">
   <div class="row" style="justify-content:space-between">
     <h1>{{ d.title }}</h1>
@@ -11,12 +12,15 @@
   <!-- 추가 -->
   <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="margin-top:16px;gap:8px">
     <input type="hidden" name="action" value="add">
-    <input type="text" name="key" placeholder="{{ '입고센터명' if which=='center_e24' else ('상품코드' if d.kind=='product' else '센터코드') }}" style="max-width:220px" required>
+    <input type="text" name="key" placeholder="{{ '입고센터명' if which=='center_e24' else ('상품코드' if is_prod else '센터코드') }}" style="max-width:200px" required>
     <span style="color:var(--sub)">→</span>
-    {% if d.kind=='center' %}
-      <input list="hublist" type="text" name="value" placeholder="거점센터" style="max-width:240px" required>
+    {% if is_prod %}
+      <input type="text" name="value" placeholder="대표=한익스상품명" style="max-width:280px" required>
+      <select name="cat" style="max-width:130px">
+        {% for c in product_cats %}<option value="{{ c }}">{{ c }}직매장</option>{% endfor %}
+      </select>
     {% else %}
-      <input type="text" name="value" placeholder="대표상품명" style="max-width:320px" required>
+      <input list="hublist" type="text" name="value" placeholder="거점센터" style="max-width:240px" required>
     {% endif %}
     <button class="btn ok" type="submit">추가</button>
   </form>
@@ -29,38 +33,66 @@
   </form>
 
   <table style="margin-top:14px">
-    <tr><th style="width:28%">{{ '입고센터명' if which=='center_e24' else ('상품코드' if d.kind=='product' else '센터코드') }}</th>
-        <th>{{ '대표=한익스상품명' if d.kind=='product' else '거점센터' }}</th>
-        <th style="width:150px">관리</th></tr>
-    {% for k,v in items %}
     <tr>
-      <td><code class="k">{{ k }}</code></td>
-      <td>
-        <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="gap:6px">
-          <input type="hidden" name="action" value="update">
-          <input type="hidden" name="key" value="{{ k }}">
-          <input type="hidden" name="q" value="{{ q }}">
-          {% if d.kind=='center' %}
-            <input list="hublist" type="text" name="value" value="{{ v }}" style="max-width:260px">
-          {% else %}
-            <input type="text" name="value" value="{{ v }}">
-          {% endif %}
-          <button class="btn gray" type="submit" style="padding:7px 12px">저장</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="{{ url_for('master_save', which=which) }}"
-              onsubmit="return confirm('삭제하시겠어요? {{ k }}')">
-          <input type="hidden" name="action" value="delete">
-          <input type="hidden" name="key" value="{{ k }}">
-          <input type="hidden" name="q" value="{{ q }}">
-          <button class="btn" type="submit" style="background:#fee2e2;color:#b91c1c;padding:7px 12px">삭제</button>
-        </form>
-      </td>
+      <th style="width:24%">{{ '입고센터명' if which=='center_e24' else ('상품코드' if is_prod else '센터코드') }}</th>
+      <th>{{ '대표=한익스상품명' if is_prod else '거점센터' }}</th>
+      {% if is_prod %}<th style="width:130px">구분</th>{% endif %}
+      <th style="width:150px">관리</th>
     </tr>
-    {% endfor %}
+
+    {% if is_prod %}
+      {% for k,rep,cat in items %}
+      <tr>
+        <td><code class="k">{{ k }}</code></td>
+        <td colspan="2">
+          <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="gap:6px">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="key" value="{{ k }}">
+            <input type="hidden" name="q" value="{{ q }}">
+            <input type="text" name="value" value="{{ rep }}" style="min-width:240px">
+            <select name="cat" style="max-width:130px">
+              {% for c in product_cats %}<option value="{{ c }}" {{ 'selected' if c==cat }}>{{ c }}직매장</option>{% endfor %}
+            </select>
+            <button class="btn gray" type="submit" style="padding:7px 12px">저장</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('master_save', which=which) }}" onsubmit="return confirm('삭제: {{ k }}')">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="key" value="{{ k }}">
+            <input type="hidden" name="q" value="{{ q }}">
+            <button class="btn" type="submit" style="background:#fee2e2;color:#b91c1c;padding:7px 12px">삭제</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      {% for k,v in items %}
+      <tr>
+        <td><code class="k">{{ k }}</code></td>
+        <td>
+          <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="gap:6px">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="key" value="{{ k }}">
+            <input type="hidden" name="q" value="{{ q }}">
+            <input list="hublist" type="text" name="value" value="{{ v }}" style="max-width:260px">
+            <button class="btn gray" type="submit" style="padding:7px 12px">저장</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('master_save', which=which) }}" onsubmit="return confirm('삭제: {{ k }}')">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="key" value="{{ k }}">
+            <input type="hidden" name="q" value="{{ q }}">
+            <button class="btn" type="submit" style="background:#fee2e2;color:#b91c1c;padding:7px 12px">삭제</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    {% endif %}
+
     {% if not items %}
-    <tr><td colspan="3" class="muted" style="text-align:center;padding:24px">항목이 없습니다.</td></tr>
+    <tr><td colspan="{{ 4 if is_prod else 3 }}" class="muted" style="text-align:center;padding:24px">항목이 없습니다.</td></tr>
     {% endif %}
   </table>
 </div>

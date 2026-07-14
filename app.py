@@ -114,7 +114,9 @@ def result(ch, token):
                            nrows=len(rows), total_qty=total_qty,
                            unmapped_centers=uc, unmapped_products=up,
                            hubs=hubs, center_key=cfg["center_key"],
-                           prod_list=prod_list, hub_list=hub_list)
+                           prod_list=prod_list, hub_list=hub_list,
+                           cover_title=sc.cover_title(cfg, rows),
+                           product_cats=sc.PRODUCT_CATS)
 
 
 @app.route("/print/<ch>/<token>")
@@ -129,6 +131,8 @@ def print_labels(ch, token):
     records = sc.parse_raw(job["path"], ch)
     rows, uc, up = sc.process(records, ch)
     rows = sc.sort_rows(rows)
+    for r in rows:
+        r["title"] = sc.make_title(cfg, r.get("구분"))
     return render_template("print.html", ch=ch, cfg=cfg, rows=rows, token=token)
 
 
@@ -146,14 +150,15 @@ def assign(ch, token):
             if val:
                 cm[code] = val
     sc.save_master(cfg["center_master"], cm)
-    # 상품 매핑 저장 (공통 마스터)
+    # 상품 매핑 저장 (공통 마스터) — {대표(한익스), 구분}
     pm = sc.load_master("product.json")
     for key in request.form:
         if key.startswith("prod::"):
             code = key[len("prod::"):]
-            val = request.form.get(key, "").strip()
-            if val:
-                pm[code] = val
+            rep = request.form.get(key, "").strip()
+            cat = request.form.get("pcat::" + code, sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+            if rep:
+                pm[code] = {"rep": rep, "cat": cat}
     sc.save_master("product.json", pm)
     flash("매핑을 저장했습니다.", "ok")
     return redirect(url_for("result", ch=ch, token=token))
@@ -198,12 +203,23 @@ def master_edit(which):
     d = MASTER_DEFS[which]
     data = sc.load_master(d["file"])
     q = request.args.get("q", "").strip()
-    items = sorted(data.items())
-    if q:
-        items = [(k, v) for k, v in items if q.lower() in k.lower() or q.lower() in str(v).lower()]
+    # 상품 마스터는 {rep, cat} 구조로 정규화하여 (코드, 대표, 구분) 튜플로 전달
+    if d["kind"] == "product":
+        rows = []
+        for k, v in sorted(data.items()):
+            rep, cat = sc.product_rep_cat(data, k)
+            rows.append((k, rep or "", cat or sc.DEFAULT_CAT))
+        if q:
+            ql = q.lower()
+            rows = [t for t in rows if ql in t[0].lower() or ql in (t[1] or "").lower()]
+        items = rows
+    else:
+        items = sorted(data.items())
+        if q:
+            items = [(k, v) for k, v in items if q.lower() in k.lower() or q.lower() in str(v).lower()]
     hubs = sc.all_hubs()
     return render_template("master_edit.html", which=which, d=d, items=items,
-                           q=q, total=len(data), hubs=hubs)
+                           q=q, total=len(data), hubs=hubs, product_cats=sc.PRODUCT_CATS)
 
 
 @app.route("/masters/<which>/save", methods=["POST"])
@@ -212,19 +228,30 @@ def master_save(which):
         abort(404)
     d = MASTER_DEFS[which]
     data = sc.load_master(d["file"])
+    is_prod = d["kind"] == "product"
     act = request.form.get("action")
     if act == "add":
         k = request.form.get("key", "").strip()
         v = request.form.get("value", "").strip()
         if k and v:
-            data[k] = v
-            flash("추가: %s → %s" % (k, v), "ok")
+            if is_prod:
+                cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+                data[k] = {"rep": v, "cat": cat}
+                flash("추가: %s → %s (%s)" % (k, v, cat), "ok")
+            else:
+                data[k] = v
+                flash("추가: %s → %s" % (k, v), "ok")
     elif act == "update":
         k = request.form.get("key", "").strip()
         v = request.form.get("value", "").strip()
         if k in data and v:
-            data[k] = v
-            flash("수정: %s → %s" % (k, v), "ok")
+            if is_prod:
+                cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+                data[k] = {"rep": v, "cat": cat}
+                flash("수정: %s → %s (%s)" % (k, v, cat), "ok")
+            else:
+                data[k] = v
+                flash("수정: %s → %s" % (k, v), "ok")
     elif act == "delete":
         k = request.form.get("key", "").strip()
         if k in data:

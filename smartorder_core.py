@@ -35,12 +35,13 @@ def ensure_masters_seeded():
 CHANNELS = {
     "cu": {
         "name": "CU",
-        "title": "대월직매장\n(BGF리테일 CU스마트오더)",
+        "tag": "CU",
+        # {jm} = 대월직매장 / 프리미엄직매장 (상품 구분에 따라 라벨별로 결정)
+        "title_tpl": "{jm}\n(BGF리테일 CU스마트오더)",
         "center_label": "CU센터",
         "center_master": "center_cu.json",
         "center_key": "code",       # 센터코드로 매핑
         "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
-        "total_title": "대월직매장(CU)스마트오더 TOTAL 수량",
         "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
         "row_h": 62.4,
         "lead_spacer": True,
@@ -60,12 +61,12 @@ CHANNELS = {
     },
     "gs": {
         "name": "GS",
-        "title": "대월직매장\n(GS슈퍼 GS스마트오더)",
+        "tag": "GS",
+        "title_tpl": "{jm}\n(GS슈퍼 GS스마트오더)",
         "center_label": "GS센터",
         "center_master": "center_gs.json",
         "center_key": "code",
         "label_product": "raw",
-        "total_title": "대월직매장(GS)스마트오더 TOTAL 수량",
         "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
         "row_h": 62.4,
         "lead_spacer": True,
@@ -84,12 +85,12 @@ CHANNELS = {
     },
     "e24": {
         "name": "이마트24",
-        "title": "오비맥주 대월직매장\n(E-24 스마트오더)",
+        "tag": "E-24",
+        "title_tpl": "오비맥주 {jm}\n(E-24 스마트오더)",
         "center_label": "E-24센터",
         "center_master": "center_e24.json",
         "center_key": "name",       # E24는 입고센터명으로 매핑(코드 없음)
         "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
-        "total_title": "대월직매장(E-24)스마트오더 TOTAL 수량",
         "col_width": {"A": 47.8, "B": 110.7, "C": 41.7, "D": 8.7},
         "row_h": 83.4,
         "lead_spacer": False,
@@ -107,6 +108,37 @@ CHANNELS = {
         },
     },
 }
+
+# 상품 구분(직매장 종류)
+PRODUCT_CATS = ["대월", "프리미엄"]
+DEFAULT_CAT = "대월"
+TOTAL_TITLE_TPL = "{jm}({tag})스마트오더 TOTAL 수량"
+
+
+def product_rep_cat(pm, code):
+    """상품마스터에서 (대표=한익스상품명, 구분) 반환. 값이 문자열이면 레거시(구분=대월).
+    미등록이면 (None, None)."""
+    v = pm.get(code)
+    if v is None:
+        return None, None
+    if isinstance(v, dict):
+        return v.get("rep", ""), v.get("cat", DEFAULT_CAT)
+    return v, DEFAULT_CAT
+
+
+def make_title(cfg, cat):
+    """상품 구분에 따른 라벨 제목. 대월→대월직매장, 프리미엄→프리미엄직매장."""
+    jm = (cat or DEFAULT_CAT) + "직매장"
+    return cfg["title_tpl"].format(jm=jm)
+
+
+def cover_title(cfg, rows):
+    """표지 제목. 포함된 구분이 하나면 그 구분, 여러 개면 '대월·프리미엄'."""
+    cats = [r.get("구분") or DEFAULT_CAT for r in rows]
+    uniq = sorted(set(cats), key=lambda c: (PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9))
+    jm = ("·".join(uniq) if uniq else DEFAULT_CAT) + "직매장"
+    return TOTAL_TITLE_TPL.format(jm=jm, tag=cfg["tag"])
+
 
 # ----------------------------------------------------------------------------
 # 유틸
@@ -265,6 +297,9 @@ def process(records, channel):
     cfg = CHANNELS[channel]
     center_master = load_master(cfg["center_master"])
     product_master = load_master("product.json")
+    # 보조: 화주상품명 -> {rep,cat} (코드 미등록 시 이름 폴백). 정규화 키로 인덱싱.
+    product_names = load_master("product_names.json")
+    pn_idx = {norm(k): v for k, v in product_names.items()}
     ckey = cfg["center_key"]
 
     rows = []
@@ -275,9 +310,15 @@ def process(records, channel):
         hub = center_master.get(ckeyval, "")
         if not hub and ckeyval:
             unmapped_centers[ckeyval] = rec["center_name"] or rec["center_code"]
-        rep = product_master.get(rec["prod_code"], "")
-        if not rep and rec["prod_code"]:
+        # 1) 코드 우선 → 2) 화주상품명 폴백
+        rep, cat = product_rep_cat(product_master, rec["prod_code"])
+        if rep is None:
+            v = pn_idx.get(norm(rec["prod_name"]))
+            if v:
+                rep, cat = v.get("rep", ""), v.get("cat", DEFAULT_CAT)
+        if rep is None and rec["prod_code"]:
             unmapped_products[rec["prod_code"]] = rec["prod_name"]
+        cat = cat or DEFAULT_CAT
         # 부착양식 라벨 = 화주상품명(원본 제품명), 표지/집계 = 대표(한익스상품명)
         label_prod = rec["prod_name"] if cfg["label_product"] == "raw" else (rep or rec["prod_name"])
         rows.append({
@@ -289,14 +330,18 @@ def process(records, channel):
             "상품명": label_prod,          # 라벨 표시용 = 화주상품명
             "수량": rec["qty"],
             "대표": rep or rec["prod_name"],   # 표지 표시용 = 한익스상품명(대표)
+            "구분": cat,                       # 대월 / 프리미엄 (라벨 제목 분기)
             "_ckey": ckeyval,
             "_pcode": rec["prod_code"],
         })
     return rows, unmapped_centers, unmapped_products
 
 def sort_rows(rows):
-    """거점센터 → 대표상품 → 점포명 순으로 정렬(창고 분류 최적화)."""
-    return sorted(rows, key=lambda x: (x["거점센터"] or "zzz", x["대표"] or "", x["점포명"] or ""))
+    """구분(대월/프리미엄) → 거점센터 → 대표상품 → 점포명 순 정렬(직매장·창고 분류 최적화)."""
+    def catkey(c):
+        return PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9
+    return sorted(rows, key=lambda x: (catkey(x.get("구분") or DEFAULT_CAT),
+                                       x["거점센터"] or "zzz", x["대표"] or "", x["점포명"] or ""))
 
 
 def compute_totals(rows):
@@ -351,9 +396,9 @@ def build_label_sheet(ws, rows, cfg):
         r += 1
     rh = cfg["row_h"]
     for n, row in enumerate(rows, start=1):
-        # 1) 제목
+        # 1) 제목 (상품 구분에 따라 대월/프리미엄 직매장)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-        _style_cell(ws.cell(r, 1), cfg["title"], 62, fill=None, align=AL_C)
+        _style_cell(ws.cell(r, 1), make_title(cfg, row.get("구분")), 62, fill=None, align=AL_C)
         _cnum_cell(ws.cell(r, 3), n)
         ws.row_dimensions[r].height = 169.95
         r += 1
@@ -403,7 +448,7 @@ def build_total_sheet(ws, rows, cfg):
         prod[row["대표"]] = prod.get(row["대표"], 0) + q
         if row["거점센터"]:
             hub[row["거점센터"]] = hub.get(row["거점센터"], 0) + q
-    ws.cell(1, 2, cfg["total_title"]).font = Font(name=FONT, size=14, bold=True)
+    ws.cell(1, 2, cover_title(cfg, rows)).font = Font(name=FONT, size=14, bold=True)
     hdr = ["번호", "상품", "수량"]
     for i, h in enumerate(hdr):
         ws.cell(2, 2 + i, h).font = Font(name=FONT, size=11, bold=True)

@@ -51,12 +51,18 @@
     {% if unmapped_products %}
     <h2 style="margin-top:18px">미매핑 상품 ({{ unmapped_products|length }})</h2>
     <table>
-      <tr><th style="width:26%">상품코드</th><th style="width:34%">화주상품명(원본·라벨표시)</th><th>대표=한익스상품명(표지표시) 지정</th></tr>
+      <tr><th style="width:20%">상품코드</th><th style="width:30%">화주상품명(원본·라벨표시)</th>
+          <th>대표=한익스상품명(표지표시)</th><th style="width:130px">구분</th></tr>
       {% for code,nm in unmapped_products.items() %}
       <tr>
         <td><code class="k">{{ code }}</code></td>
         <td class="muted">{{ nm }}</td>
         <td><input type="text" name="prod::{{ code }}" value="{{ nm }}"></td>
+        <td>
+          <select name="pcat::{{ code }}">
+            {% for c in product_cats %}<option value="{{ c }}">{{ c }}직매장</option>{% endfor %}
+          </select>
+        </td>
       </tr>
       {% endfor %}
     </table>
@@ -90,7 +96,7 @@
   <!-- 캡처 대상: 원본 표지 양식과 동일 스타일 -->
   <div style="overflow:auto;margin-top:12px">
     <div id="cover" class="cover">
-      <div class="cover-title">{{ cfg.total_title }}</div>
+      <div class="cover-title">{{ cover_title }}</div>
       <div class="cover-body">
         <table class="cv">
           <tr><th class="hy" style="width:48px">번호</th><th class="hy">상품</th><th class="hy" style="width:66px">수량</th></tr>
@@ -143,7 +149,7 @@ async function copyCoverImage(){
 async function saveCoverImage(){ const c=await renderCover(); c.toBlob(dlBlob,'image/png'); }
 function printCover(){
   const w=window.open('','_blank');
-  w.document.write('<html><head><meta charset="utf-8"><title>{{ cfg.total_title }}</title></head><body style="margin:14px">'+
+  w.document.write('<html><head><meta charset="utf-8"><title>{{ cover_title }}</title></head><body style="margin:14px">'+
     document.getElementById('cover').outerHTML+
     '<style>'+[...document.styleSheets].map(s=>{try{return[...s.cssRules].map(r=>r.cssText).join('')}catch(e){return''}}).join('')+'</style>'+
     '<scr'+'ipt>window.onload=()=>window.print()</scr'+'ipt></body></html>');

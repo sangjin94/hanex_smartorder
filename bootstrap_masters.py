@@ -43,18 +43,21 @@ gs_n2h = name2hub_from_master(os.path.join(SRC,"GS 스마트오더 출력양식.
 e24_n2h = name2hub_from_master(os.path.join(SRC,"이마트24 스마트오더 출력양식.xlsx"), "E24 점포마스터")
 L("점포마스터 name->hub  CU:%d  GS:%d  E24:%d" % (len(cu_n2h), len(gs_n2h), len(e24_n2h)))
 
-# ---------- 2) 상품마스터: 상품명 -> 대표 ----------
+# ---------- 2) 상품마스터: 상품명 -> (대표, 구분) ----------
 def prodname2rep(path, sheet="상품마스터(대표)"):
     rows = load_xlsx(path, sheet)
     m = {}
     for r in rows[1:]:
         if len(r) < 2: continue
         name = norm(r[0]); rep = norm(r[1])
+        cat = norm(r[2]) if len(r) > 2 else ""
+        cat = cat if cat in ("대월", "프리미엄") else "대월"
         if name and rep and name not in m:
-            m[name] = rep
+            m[name] = (rep, cat)
     return m
 pn2rep = prodname2rep(os.path.join(SRC,"GS 스마트오더 출력양식.xlsx"))
-L("상품마스터 name->rep : %d" % len(pn2rep))
+from collections import Counter as _C
+L("상품마스터 name->(rep,cat) : %d  구분분포=%s" % (len(pn2rep), dict(_C(c for _,c in pn2rep.values()))))
 
 # ---------- 3) CU: 센터코드->센터명 (발주확인 시트) ----------
 def cols_by_header(rows, header_row, wanted):
@@ -67,7 +70,7 @@ def cols_by_header(rows, header_row, wanted):
                 idx[key] = i; break
     return idx
 
-cu_rows = load_xlsx(os.path.join(SRC,"CU 스마트오더 출력양식.xlsx"), "발주확인 및 확정내역(스티커제작용)")
+cu_rows = load_xlsx(os.path.join(SRC,"CU 스마트오더.xlsx"), "발주확인 및 확정내역(스티커제작용)")
 cu_idx = cols_by_header(cu_rows, 0, {"code":["센터 코드","센터코드"], "name":["센터명"], "pcode":["상품 코드","상품코드"], "pname":["상품명"]})
 L("CU 헤더 idx: %s" % cu_idx)
 cu_code2hub = {}; cu_code2name = {}; cu_pcode2rep = {}; cu_unmapped_center=set(); cu_unmapped_prod=set()
@@ -150,22 +153,26 @@ def ei(*labels):
     for i,x in enumerate(eh):
         if x in labels: return i
     return None
-ep=ei("상품코드"); en=ei("앱 상품명","상품명(대표)","앱상품명")
-erep=ei("상품명(대표)")
+ep=ei("상품코드"); en=ei("앱 상품명","앱상품명"); erep=ei("상품명(대표)")
 for r in e24l[1:]:
     if ep is None: break
     pcode=norm(r[ep]) if ep<len(r) else ""
-    rep = norm(r[erep]) if (erep is not None and erep<len(r)) else ""
-    if not rep and en is not None and en<len(r):
-        rep = pn2rep.get(norm(r[en]),"")
-    if pcode and rep: e24_pcode2rep[pcode]=rep
+    if not pcode: continue
+    appname = norm(r[en]) if (en is not None and en<len(r)) else ""
+    pr = pn2rep.get(appname)                        # (rep, cat)
+    if pr is None:
+        rep = norm(r[erep]) if (erep is not None and erep<len(r)) else ""
+        if rep: pr = (rep, "대월")
+    if pr: e24_pcode2rep[pcode]=pr
 L("E24 입고센터->hub: %d   상품코드->대표: %d" % (len(e24_center), len(e24_pcode2rep)))
 
-# ---------- 통합 상품마스터 ----------
+# ---------- 통합 상품마스터: {코드: {rep, cat}} ----------
 product = {}
 for d in (cu_pcode2rep, gs_pcode2rep, e24_pcode2rep):
-    product.update(d)
-L("통합 상품코드->대표: %d" % len(product))
+    for code,(rep,cat) in d.items():
+        product[code] = {"rep": rep, "cat": cat}
+from collections import Counter as _C2
+L("통합 상품코드->{대표,구분}: %d  구분분포=%s" % (len(product), dict(_C2(v['cat'] for v in product.values()))))
 
 def dump(name, obj):
     with open(os.path.join(OUT,name),"w",encoding="utf-8") as f:
@@ -175,6 +182,8 @@ dump("center_cu.json", cu_code2hub)
 dump("center_gs.json", gs_code2hub)
 dump("center_e24.json", e24_center)
 dump("product.json", product)
+# 보조 시드: 화주상품명 -> {대표, 구분}. 코드 미등록 시 이름으로 폴백(특히 프리미엄 자동분류)
+dump("product_names.json", {name: {"rep": rep, "cat": cat} for name, (rep, cat) in pn2rep.items()})
 dump("center_cu_names.json", cu_code2name)
 dump("center_gs_names.json", gs_code2name)
 # 미매핑 목록(참고)
