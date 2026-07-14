@@ -2,11 +2,12 @@
 """스마트오더 라벨 생성 핵심 엔진 (채널: CU / GS / E24)
 
 설계 원칙
- - 매핑은 '코드' 기반: 센터코드→거점센터, 상품코드→대표상품명 (E24 센터는 코드가 없어 입고센터명 키)
- - 마스터는 JSON 파일. 업로드 중 미매핑 코드는 화면에서 즉시 등록 → 재사용
+ - 센터 매핑은 '센터명' 기반(전 채널 공통 center.json). 센터코드를 안 쓰는 채널(E24)이 있어 이름으로 통일
+ - 상품 매핑은 '상품코드' 기반: 상품코드 → 대표(한익스상품명) + 구분(대월/프리미엄)
+ - 마스터는 JSON 파일. 업로드 중 미매핑 항목은 화면에서 즉시 등록 → 재사용
  - 부착양식(A4출력)은 기존 xlsx와 픽셀 단위로 동일한 스타일로 새로 생성(정적값·정확한 라벨 수)
 """
-import os, json, io
+import os, json, io, datetime
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, Color
 from openpyxl.utils import get_column_letter
@@ -32,6 +33,8 @@ def ensure_masters_seeded():
 # ----------------------------------------------------------------------------
 # 채널 정의
 # ----------------------------------------------------------------------------
+CENTER_MASTER = "center.json"   # 전 채널 공통: {센터명: 이고센터}. 센터코드를 안 쓰는 채널(E24)이 있어 이름 키로 통일
+
 CHANNELS = {
     "cu": {
         "name": "CU",
@@ -39,8 +42,7 @@ CHANNELS = {
         # {jm} = 대월직매장 / 프리미엄직매장 (상품 구분에 따라 라벨별로 결정)
         "title_tpl": "{jm}\n(BGF리테일 CU스마트오더)",
         "center_label": "CU센터",
-        "center_master": "center_cu.json",
-        "center_key": "code",       # 센터코드로 매핑
+        "hub_col": "배송센터",       # 라벨출력(폼텍) 시트에 덧붙일 이고센터 컬럼명
         "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
         "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
         "row_h": 62.4,
@@ -64,8 +66,7 @@ CHANNELS = {
         "tag": "GS",
         "title_tpl": "{jm}\n(GS슈퍼 GS스마트오더)",
         "center_label": "GS센터",
-        "center_master": "center_gs.json",
-        "center_key": "code",
+        "hub_col": "배송센터",
         "label_product": "raw",
         "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
         "row_h": 62.4,
@@ -88,8 +89,7 @@ CHANNELS = {
         "tag": "E-24",
         "title_tpl": "오비맥주 {jm}\n(E-24 스마트오더)",
         "center_label": "E-24센터",
-        "center_master": "center_e24.json",
-        "center_key": "name",       # E24는 입고센터명으로 매핑(코드 없음)
+        "hub_col": "한익스",         # E24 양식은 이고센터 컬럼명이 '한익스'
         "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
         "col_width": {"A": 47.8, "B": 110.7, "C": 41.7, "D": 8.7},
         "row_h": 83.4,
@@ -146,6 +146,8 @@ def cover_title(cfg, rows):
 def norm(v):
     if v is None:
         return ""
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.strftime("%Y-%m-%d")
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
     s = str(v).strip()
@@ -177,10 +179,18 @@ def save_master(fname, data):
 
 def all_hubs():
     """거점센터(이고센터) 후보 목록 — 관리 UI 드롭다운용."""
-    hubs = set()
-    for fn in ("center_cu.json", "center_gs.json", "center_e24.json"):
-        hubs.update(load_master(fn).values())
-    return sorted(h for h in hubs if h)
+    return sorted({h for h in load_master(CENTER_MASTER).values() if h})
+
+
+def all_reps():
+    """등록된 한익스상품명 → 구분. 같은 상품이라도 채널마다 코드가 달라, 코드를 기존 상품에 붙일 때 쓴다."""
+    pm = load_master("product.json")
+    reps = {}
+    for code in pm:
+        rep, cat = product_rep_cat(pm, code)
+        if rep:
+            reps.setdefault(rep, cat or DEFAULT_CAT)
+    return dict(sorted(reps.items()))
 
 # ----------------------------------------------------------------------------
 # RAW 파싱
@@ -209,7 +219,15 @@ def _pick_sheet(path, hints):
         for ws in wb.sheets():
             if any(h in ws.name for h in hints):
                 best = ws; break
-        return best.name, [[best.cell_value(i, j) for j in range(best.ncols)] for i in range(best.nrows)]
+        def cval(i, j):
+            # xls는 날짜가 실수(시리얼)로 저장됨 → datetime 복원(라벨출력 시트에 원본 날짜 유지)
+            if best.cell_type(i, j) == xlrd.XL_CELL_DATE:
+                try:
+                    return xlrd.xldate.xldate_as_datetime(best.cell_value(i, j), wb.datemode)
+                except Exception:
+                    pass
+            return best.cell_value(i, j)
+        return best.name, [[cval(i, j) for j in range(best.ncols)] for i in range(best.nrows)]
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     target = wb.worksheets[0]
     for ws in wb.worksheets:
@@ -295,28 +313,27 @@ def process(records, channel):
     rows: 붙여넣기(데이터추출)용 dict 리스트
     """
     cfg = CHANNELS[channel]
-    center_master = load_master(cfg["center_master"])
+    center_master = load_master(CENTER_MASTER)
     product_master = load_master("product.json")
     # 보조: 화주상품명 -> {rep,cat} (코드 미등록 시 이름 폴백). 정규화 키로 인덱싱.
     product_names = load_master("product_names.json")
     pn_idx = {norm(k): v for k, v in product_names.items()}
-    ckey = cfg["center_key"]
 
     rows = []
-    unmapped_centers = {}   # key -> 대표명칭(표시용)
+    unmapped_centers = {}   # 센터명 -> 참고표시(센터코드)
     unmapped_products = {}  # code -> name
     for rec in records:
-        ckeyval = rec["center_code"] if ckey == "code" else rec["center_name"]
+        ckeyval = rec["center_name"]   # 센터 매핑 키 = 센터명(전 채널 공통)
         hub = center_master.get(ckeyval, "")
         if not hub and ckeyval:
-            unmapped_centers[ckeyval] = rec["center_name"] or rec["center_code"]
+            unmapped_centers[ckeyval] = rec["center_code"]
         # 1) 코드 우선 → 2) 화주상품명 폴백
         rep, cat = product_rep_cat(product_master, rec["prod_code"])
         if rep is None:
             v = pn_idx.get(norm(rec["prod_name"]))
             if v:
                 rep, cat = v.get("rep", ""), v.get("cat", DEFAULT_CAT)
-        if rep is None and rec["prod_code"]:
+        if not rep and rec["prod_code"]:
             unmapped_products[rec["prod_code"]] = rec["prod_name"]
         cat = cat or DEFAULT_CAT
         # 부착양식 라벨 = 화주상품명(원본 제품명), 표지/집계 = 대표(한익스상품명)
@@ -329,19 +346,130 @@ def process(records, channel):
             "거점센터": hub,
             "상품명": label_prod,          # 라벨 표시용 = 화주상품명
             "수량": rec["qty"],
-            "대표": rep or rec["prod_name"],   # 표지 표시용 = 한익스상품명(대표)
+            # 표지 표시용 = 한익스상품명(대표). 마스터에 없으면 빈값 — 화주상품명으로 폴백하지 않는다.
+            "대표": rep or "",
             "구분": cat,                       # 대월 / 프리미엄 (라벨 제목 분기)
             "_ckey": ckeyval,
             "_pcode": rec["prod_code"],
         })
     return rows, unmapped_centers, unmapped_products
 
+
+def missing_reps(rows):
+    """한익스상품명(대표)이 비어 있는 행 → {상품코드: 화주상품명}. 비어 있지 않으면 출력 차단 대상."""
+    miss = {}
+    for row in rows:
+        if not row["대표"]:
+            miss[row["_pcode"] or row["상품명"]] = row["상품명"]
+    return miss
+
+
 def sort_rows(rows):
-    """구분(대월/프리미엄) → 거점센터 → 대표상품 → 점포명 순 정렬(직매장·창고 분류 최적화)."""
+    """구분(대월/프리미엄) → 상품명(화주·라벨표시) → 이고센터 → 채널센터 → 점포명 순 정렬."""
     def catkey(c):
         return PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9
     return sorted(rows, key=lambda x: (catkey(x.get("구분") or DEFAULT_CAT),
-                                       x["거점센터"] or "zzz", x["대표"] or "", x["점포명"] or ""))
+                                       x["상품명"] or "",
+                                       x["거점센터"] or "zzz",
+                                       x["센터"] or "",
+                                       x["점포명"] or ""))
+
+
+REP_COL = "상품명(대표)"   # 라벨출력(폼텍) 시트의 한익스상품명 컬럼명
+
+
+def labelout_grid(path, channel):
+    """폼텍 디자인프로용 '라벨출력' 그리드.
+
+    RAW 원본 컬럼을 그대로 보존하고 뒤에 매핑 컬럼 2개를 덧붙인다.
+      - {hub_col}: 이고센터 (CU/GS='배송센터', E24='한익스')
+      - 상품명(대표): 한익스상품명
+    행 순서는 부착양식과 동일(구분 → 상품명 → 이고센터 → 채널센터).
+    반환: (headers, rows) — rows의 셀은 RAW 원본 값(날짜는 datetime 유지).
+    """
+    cfg = CHANNELS[channel]
+    _, grid = _pick_sheet(path, cfg["raw"]["sheet_hint"])
+    hrow, idx = _find_header(grid, cfg)
+    if "prod_code" not in idx or "qty" not in idx:
+        raise ValueError("RAW에서 필수 컬럼을 찾지 못했습니다(라벨출력).")
+
+    headers = [h for h in grid[hrow]]
+    while headers and not norm(headers[-1]):   # 서식만 있는 꼬리 빈 컬럼 제거(E24 양식)
+        headers.pop()
+    ncol = len(headers)
+    hub_col, rep_col = cfg["hub_col"], REP_COL
+    # 이미 같은 컬럼이 있으면(출력양식 재업로드) 덧붙이지 않고 덮어쓴다
+    hdr_norm = [norm(h) for h in headers]
+    hub_i = hdr_norm.index(hub_col) if hub_col in hdr_norm else None
+    rep_i = hdr_norm.index(rep_col) if rep_col in hdr_norm else None
+    if hub_i is None:
+        headers.append(hub_col); hub_i = ncol; ncol += 1
+    if rep_i is None:
+        headers.append(rep_col); rep_i = ncol; ncol += 1
+
+    center_master = load_master(CENTER_MASTER)
+    product_master = load_master("product.json")
+    pn_idx = {norm(k): v for k, v in load_master("product_names.json").items()}
+
+    def g(r, key):
+        i = idx.get(key)
+        if i is None or i >= len(r):
+            return ""
+        return norm(r[i])
+
+    out = []
+    for r in grid[hrow + 1:]:
+        if not any(norm(x) for x in r):
+            continue
+        cname, ccode = g(r, "center_name"), g(r, "center_code")
+        pcode, pname = g(r, "prod_code"), g(r, "prod_name")
+        if not (cname or ccode) and not pcode:
+            continue
+        if not pcode and not pname:
+            continue
+        hub = center_master.get(cname, "")
+        rep, cat = product_rep_cat(product_master, pcode)
+        if not rep:
+            v = pn_idx.get(norm(pname))
+            if v:
+                rep, cat = v.get("rep", ""), v.get("cat", DEFAULT_CAT)
+        cells = list(r) + [None] * (ncol - len(r))
+        cells[hub_i] = hub
+        cells[rep_i] = rep or ""
+        out.append({"cells": cells[:ncol], "_cat": cat or DEFAULT_CAT,
+                    "_prod": pname, "_hub": hub, "_center": cname,
+                    "_store": g(r, "store_name") or cname})
+
+    def catkey(c):
+        return PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9
+    out.sort(key=lambda x: (catkey(x["_cat"]), x["_prod"] or "",
+                            x["_hub"] or "zzz", x["_center"] or "", x["_store"] or ""))
+    return headers, [x["cells"] for x in out]
+
+
+HDR_FILL = PatternFill("solid", fgColor="FFEEF2F5")
+
+
+def build_labelout_sheet(ws, headers, rows):
+    """폼텍 디자인프로 데이터 원본 시트(1행=헤더, 1행=라벨 1장)."""
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        cell = ws.cell(1, c)
+        cell.font = Font(name=FONT, size=10)
+        cell.fill = HDR_FILL
+        cell.alignment = AL_C
+    for row in rows:
+        ws.append(row)
+    for r in range(2, ws.max_row + 1):
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(r, c)
+            cell.font = Font(name=FONT, size=10)
+            if isinstance(cell.value, (datetime.datetime, datetime.date)):
+                cell.number_format = "yyyy-mm-dd"
+    for c, h in enumerate(headers, 1):
+        w = max(9, min(28, len(norm(h)) + 6))
+        ws.column_dimensions[get_column_letter(c)].width = w
+    ws.freeze_panes = "A2"
 
 
 def compute_totals(rows):
@@ -367,8 +495,34 @@ FILL_YELLOW = PatternFill("solid", fgColor="FFFFFF00")
 FILL_WARN = PatternFill("solid", fgColor=Color(theme=1, tint=0.05))
 AL_C = Alignment(horizontal="center", vertical="center", wrap_text=True)
 AL_C_NW = Alignment(horizontal="center", vertical="center", wrap_text=False)
+# 값 셀: 계산한 글자크기 + 엑셀 '축소하여 전체 표시'(추정이 빗나가도 잘리지 않게 하는 안전망)
+AL_C_FIT = Alignment(horizontal="center", vertical="center", wrap_text=False, shrink_to_fit=True)
 AL_V = Alignment(vertical="center")
 AL_CNUM = Alignment(vertical="center", wrap_text=True)   # 노란 C열(라벨번호) — 원본과 동일
+
+def _text_units(s):
+    """반각 1 / 한글·한자 등 전각 2 로 센 텍스트 폭(반각 단위)."""
+    n = 0
+    for ch in norm(s):
+        n += 2 if ord(ch) > 0x1100 else 1
+    return n
+
+
+def _col_px(width):
+    """엑셀 열 너비(문자 단위) → 픽셀."""
+    return width * 7 + 5
+
+
+def fit_font_size(text, col_width, base, min_size=22, pad_px=12):
+    """열 너비 안에 한 줄로 다 들어가는 최대 글자크기(pt). base를 넘지 않고 min_size 아래로도 안 내려감.
+    전각 1글자 폭 ≈ 글자크기(pt) × 96/72 픽셀 로 추정."""
+    units = _text_units(text)
+    if units == 0:
+        return base
+    avail = _col_px(col_width) - pad_px
+    size = avail / (units * (96 / 72) / 2)
+    return max(min_size, min(base, int(size)))
+
 
 def _cnum_cell(cell, value=None):
     cell.value = value
@@ -395,10 +549,14 @@ def build_label_sheet(ws, rows, cfg):
         _cnum_cell(ws.cell(r, 3))
         r += 1
     rh = cfg["row_h"]
+    wa, wbv = cfg["col_width"]["A"], cfg["col_width"]["B"]
+    wtitle = wa + wbv          # 제목은 A:B 병합
     for n, row in enumerate(rows, start=1):
         # 1) 제목 (상품 구분에 따라 대월/프리미엄 직매장)
+        title = make_title(cfg, row.get("구분"))
+        tsize = min(fit_font_size(line, wtitle, 62, min_size=40) for line in title.split("\n"))
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-        _style_cell(ws.cell(r, 1), make_title(cfg, row.get("구분")), 62, fill=None, align=AL_C)
+        _style_cell(ws.cell(r, 1), title, tsize, fill=None, align=AL_C)
         _cnum_cell(ws.cell(r, 3), n)
         ws.row_dimensions[r].height = 169.95
         r += 1
@@ -417,8 +575,9 @@ def build_label_sheet(ws, rows, cfg):
             (" 수량", row["수량"], 48),
         ]
         for label, value, bsize in items:
-            _style_cell(ws.cell(r, 1), label, 42)
-            _style_cell(ws.cell(r, 2), value, bsize)
+            # 긴 상품명·센터명이 열 밖으로 잘리지 않도록 글자크기를 폭에 맞춰 축소
+            _style_cell(ws.cell(r, 1), label, fit_font_size(label, wa, 42), align=AL_C_FIT)
+            _style_cell(ws.cell(r, 2), value, fit_font_size(value, wbv, bsize), align=AL_C_FIT)
             _cnum_cell(ws.cell(r, 3))
             ws.row_dimensions[r].height = rh
             r += 1
@@ -445,7 +604,8 @@ def build_total_sheet(ws, rows, cfg):
     hub = OrderedDict()
     for row in rows:
         q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
-        prod[row["대표"]] = prod.get(row["대표"], 0) + q
+        if row["대표"]:   # 표지 상품명은 항상 한익스상품명(대표)만
+            prod[row["대표"]] = prod.get(row["대표"], 0) + q
         if row["거점센터"]:
             hub[row["거점센터"]] = hub.get(row["거점센터"], 0) + q
     ws.cell(1, 2, cover_title(cfg, rows)).font = Font(name=FONT, size=14, bold=True)
@@ -463,7 +623,21 @@ def build_total_sheet(ws, rows, cfg):
     for col, w in {"B": 6, "C": 34, "D": 8, "E": 3, "F": 16, "G": 10}.items():
         ws.column_dimensions[col].width = w
 
-def generate_workbook(rows, channel):
+def generate_labelout_workbook(path, channel):
+    """폼텍 디자인프로 전용: 'lowdata(라벨출력)' 시트 하나만 담은 xlsx."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "lowdata(라벨출력)"
+    headers, grid = labelout_grid(path, channel)
+    build_labelout_sheet(ws, headers, grid)
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return bio
+
+
+def generate_workbook(rows, channel, path=None):
+    """path를 주면 폼텍용 'lowdata(라벨출력)' 시트를 첫 탭으로 함께 생성(RAW 원본 + 매핑 컬럼)."""
     cfg = CHANNELS[channel]
     rows = sort_rows(rows)
     wb = openpyxl.Workbook()
@@ -471,7 +645,15 @@ def generate_workbook(rows, channel):
         wb._named_styles["Normal"].font = Font(name=FONT, size=11)  # 빈 셀 기본폰트도 맑은 고딕
     except Exception:
         pass
-    ws_total = wb.active; ws_total.title = "TOTAL(표지)"
+    ws_first = wb.active
+    if path:
+        ws_first.title = "lowdata(라벨출력)"
+        headers, grid = labelout_grid(path, channel)
+        build_labelout_sheet(ws_first, headers, grid)
+        ws_total = wb.create_sheet("TOTAL(표지)")
+    else:
+        ws_total = ws_first
+        ws_total.title = "TOTAL(표지)"
     build_total_sheet(ws_total, rows, cfg)
     ws_label = wb.create_sheet("부착양식(A4출력)")
     build_label_sheet(ws_label, rows, cfg)

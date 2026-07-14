@@ -4,7 +4,7 @@
 기능
  - 판매채널(CU/GS/E24)별 RAW 업로드 → 코드 기반 매핑 → 부착양식(A4) 라벨 xlsx 생성
  - 업로드 중 미매핑 센터/상품 코드를 화면에서 즉시 마스터에 등록
- - 마스터 관리(센터코드→거점센터, 상품코드→대표상품명) 조회/추가/수정/삭제
+ - 마스터 관리(센터명→이고센터[전 채널 공통], 상품코드→한익스상품명) 조회/추가/수정/삭제
 """
 import os, io, json, re, uuid, datetime
 from flask import (Flask, request, render_template, send_file, redirect,
@@ -65,16 +65,10 @@ def _rec_path(rec):
 
 @app.route("/")
 def index():
-    stats = {}
-    for ch in CH_ORDER:
-        cfg = sc.CHANNELS[ch]
-        stats[ch] = {
-            "name": cfg["name"],
-            "centers": len(sc.load_master(cfg["center_master"])),
-        }
+    centers = len(sc.load_master(sc.CENTER_MASTER))
     products = len(sc.load_master("product.json"))
     return render_template("index.html", channels=CH_ORDER, cfg=sc.CHANNELS,
-                           stats=stats, products=products)
+                           centers=centers, products=products)
 
 
 @app.route("/u/<ch>", methods=["GET", "POST"])
@@ -150,14 +144,27 @@ def result(ch, token):
     total_qty = sum(r["수량"] for r in rows if isinstance(r["수량"], (int, float)))
     prod_list, hub_list = sc.compute_totals(rows)
     hubs = sc.all_hubs()
+    # 기존 한익스상품명 목록(+구분) — 미매핑 코드를 기존 상품에 붙일 때 오타로 새 상품이 생기는 걸 방지
+    rep_cats = sc.all_reps()
     return render_template("result.html", ch=ch, cfg=cfg, token=token,
                            filename=job["filename"], nrec=len(records),
                            nrows=len(rows), total_qty=total_qty,
                            unmapped_centers=uc, unmapped_products=up,
-                           hubs=hubs, center_key=cfg["center_key"],
+                           hubs=hubs, rep_cats=rep_cats,
                            prod_list=prod_list, hub_list=hub_list,
                            cover_title=sc.cover_title(cfg, rows),
                            product_cats=sc.PRODUCT_CATS)
+
+
+def _block_if_missing_reps(rows, ch, token):
+    """한익스상품명(대표)이 없는 상품이 하나라도 있으면 출력(다운로드·인쇄)을 막는다.
+    표지에는 항상 한익스상품명만 들어가야 하므로, 화주상품명으로 대체 출력하지 않는다."""
+    miss = sc.missing_reps(rows)
+    if not miss:
+        return None
+    flash("한익스상품명이 등록되지 않은 상품이 있어 출력할 수 없습니다: %s — 아래에서 등록 후 다시 시도해 주세요."
+          % ", ".join("%s(%s)" % (c, n) for c, n in list(miss.items())[:5]), "error")
+    return redirect(url_for("result", ch=ch, token=token))
 
 
 @app.route("/print/<ch>/<token>")
@@ -171,6 +178,9 @@ def print_labels(ch, token):
     cfg = sc.CHANNELS[ch]
     records = sc.parse_raw(job["path"], ch)
     rows, uc, up = sc.process(records, ch)
+    blocked = _block_if_missing_reps(rows, ch, token)
+    if blocked:
+        return blocked
     rows = sc.sort_rows(rows)
     for r in rows:
         r["title"] = sc.make_title(cfg, r.get("구분"))
@@ -181,16 +191,15 @@ def print_labels(ch, token):
 def assign(ch, token):
     if ch not in sc.CHANNELS:
         abort(404)
-    cfg = sc.CHANNELS[ch]
-    # 센터 매핑 저장
-    cm = sc.load_master(cfg["center_master"])
+    # 센터 매핑 저장(전 채널 공통 마스터, 키=센터명)
+    cm = sc.load_master(sc.CENTER_MASTER)
     for key in request.form:
         if key.startswith("center::"):
-            code = key[len("center::"):]
+            name = key[len("center::"):]
             val = request.form.get(key, "").strip()
             if val:
-                cm[code] = val
-    sc.save_master(cfg["center_master"], cm)
+                cm[name] = val
+    sc.save_master(sc.CENTER_MASTER, cm)
     # 상품 매핑 저장 (공통 마스터) — {대표(한익스), 구분}
     pm = sc.load_master("product.json")
     for key in request.form:
@@ -216,9 +225,34 @@ def download(ch, token):
     cfg = sc.CHANNELS[ch]
     records = sc.parse_raw(job["path"], ch)
     rows, uc, up = sc.process(records, ch)
-    bio = sc.generate_workbook(rows, ch)
+    blocked = _block_if_missing_reps(rows, ch, token)
+    if blocked:
+        return blocked
+    bio = sc.generate_workbook(rows, ch, job["path"])
     today = datetime.datetime.now().strftime("%Y%m%d")
     fname = "%s_스마트오더_부착양식_%s.xlsx" % (cfg["name"], today)
+    return send_file(bio, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/labelout/<ch>/<token>")
+def labelout(ch, token):
+    """폼텍 디자인프로 데이터 원본용: RAW 원본 컬럼 + 배송센터(이고) + 상품명(대표) 시트만 담은 xlsx."""
+    if ch not in sc.CHANNELS:
+        abort(404)
+    job = _load_job(ch, token)
+    if not job:
+        flash("업로드 세션이 만료되었습니다.", "error")
+        return redirect(url_for("upload", ch=ch))
+    cfg = sc.CHANNELS[ch]
+    records = sc.parse_raw(job["path"], ch)
+    rows, uc, up = sc.process(records, ch)
+    blocked = _block_if_missing_reps(rows, ch, token)
+    if blocked:
+        return blocked
+    bio = sc.generate_labelout_workbook(job["path"], ch)
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    fname = "%s_스마트오더_라벨출력(폼텍)_%s.xlsx" % (cfg["name"], today)
     return send_file(bio, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -265,10 +299,8 @@ def history_delete(uid):
 
 # ---------------- 마스터 관리 ----------------
 MASTER_DEFS = {
-    "center_cu":  {"file": "center_cu.json",  "title": "CU 센터 (센터코드→거점센터)", "kind": "center"},
-    "center_gs":  {"file": "center_gs.json",  "title": "GS 센터 (센터코드→거점센터)", "kind": "center"},
-    "center_e24": {"file": "center_e24.json", "title": "이마트24 센터 (입고센터명→거점센터)", "kind": "center"},
-    "product":    {"file": "product.json",    "title": "상품 (상품코드→대표=한익스상품명)", "kind": "product"},
+    "center":  {"file": sc.CENTER_MASTER, "title": "센터 (센터명→이고센터) · 전 채널 공통", "kind": "center"},
+    "product": {"file": "product.json",   "title": "상품 (한익스상품명 ← 채널별 상품코드)", "kind": "product"},
 }
 
 @app.route("/masters")
@@ -284,22 +316,26 @@ def master_edit(which):
     d = MASTER_DEFS[which]
     data = sc.load_master(d["file"])
     q = request.args.get("q", "").strip()
-    # 상품 마스터는 {rep, cat} 구조로 정규화하여 (코드, 대표, 구분) 튜플로 전달
+    reps = []
+    # 상품 마스터: 같은 상품이 채널마다 코드가 달라 → 한익스상품명으로 묶어서 보여준다
     if d["kind"] == "product":
-        rows = []
-        for k, v in sorted(data.items()):
-            rep, cat = sc.product_rep_cat(data, k)
-            rows.append((k, rep or "", cat or sc.DEFAULT_CAT))
+        groups = {}
+        for code in sorted(data):
+            rep, cat = sc.product_rep_cat(data, code)
+            g = groups.setdefault(rep or "", {"rep": rep or "", "cat": cat or sc.DEFAULT_CAT, "codes": []})
+            g["codes"].append(code)
+        reps = sorted(groups)
+        items = sorted(groups.values(), key=lambda g: g["rep"])
         if q:
             ql = q.lower()
-            rows = [t for t in rows if ql in t[0].lower() or ql in (t[1] or "").lower()]
-        items = rows
+            items = [g for g in items
+                     if ql in g["rep"].lower() or any(ql in c.lower() for c in g["codes"])]
     else:
         items = sorted(data.items())
         if q:
             items = [(k, v) for k, v in items if q.lower() in k.lower() or q.lower() in str(v).lower()]
     hubs = sc.all_hubs()
-    return render_template("master_edit.html", which=which, d=d, items=items,
+    return render_template("master_edit.html", which=which, d=d, items=items, reps=reps,
                            q=q, total=len(data), hubs=hubs, product_cats=sc.PRODUCT_CATS)
 
 
@@ -333,6 +369,23 @@ def master_save(which):
             else:
                 data[k] = v
                 flash("수정: %s → %s" % (k, v), "ok")
+    elif act == "update_group" and is_prod:
+        # 한익스상품명/구분 일괄 수정 — 그 상품의 채널별 코드 전부에 적용
+        old = request.form.get("old_rep", "").strip()
+        v = request.form.get("value", "").strip()
+        cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+        codes = [c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old]
+        if v and codes:
+            for c in codes:
+                data[c] = {"rep": v, "cat": cat}
+            flash("수정: %s → %s (%s) · 코드 %d개 적용" % (old, v, cat, len(codes)), "ok")
+    elif act == "delete_group" and is_prod:
+        old = request.form.get("old_rep", "").strip()
+        codes = [c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old]
+        for c in codes:
+            data.pop(c)
+        if codes:
+            flash("삭제: %s (코드 %d개)" % (old, len(codes)), "ok")
     elif act == "delete":
         k = request.form.get("key", "").strip()
         if k in data:

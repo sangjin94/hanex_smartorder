@@ -3,9 +3,9 @@
 {% block body %}
 <div class="card">
   <h1>마스터 관리</h1>
-  <div class="sub">코드 기반 매핑 테이블입니다. 센터코드가 바뀌지 않는 한 유지되므로 명칭 변동에 강합니다.</div>
+  <div class="sub">센터는 <b>센터명</b>으로, 상품은 <b>상품코드</b>로 매핑합니다. 센터마스터는 전 채널(CU·GS·이마트24) 공통이라 한 번 등록하면 모든 채널에 적용됩니다.</div>
   <div class="grid">
-    {% set colors = {'center_cu':'#7c3aed','center_gs':'#0891b2','center_e24':'#ea580c','product':'#1d4ed8'} %}
+    {% set colors = {'center':'#7c3aed','product':'#1d4ed8'} %}
     {% for key,d in defs.items() %}
     <a class="chcard" style="background:linear-gradient(135deg,{{colors[key]}},{{colors[key]}}cc)"
        href="{{ url_for('master_edit', which=key) }}">

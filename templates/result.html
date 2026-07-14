@@ -22,26 +22,38 @@
   </div>
   <div class="row" style="margin-top:16px">
     <a class="btn big ok" href="{{ url_for('download', ch=ch, token=token) }}">⬇ 부착양식 다운로드 (.xlsx)</a>
+    <a class="btn big" href="{{ url_for('labelout', ch=ch, token=token) }}">🏷 라벨출력 (폼텍 디자인프로용)</a>
     <a class="btn big" href="{{ url_for('print_labels', ch=ch, token=token) }}" target="_blank">🖨 라벨 미리보기 · 인쇄</a>
+  </div>
+  <div class="muted" style="margin-top:6px">
+    라벨출력 파일 = RAW 원본 컬럼 + <b>{{ cfg.hub_col }}</b>(이고센터) + <b>상품명(대표)</b>(한익스상품명).
+    폼텍 디자인프로에서 이 파일을 데이터 원본으로 불러 라벨 인쇄에 사용하세요. (1행 = 라벨 1장)
   </div>
   {% else %}
   <div class="warnbox">
     <b>⚠ 미매핑 코드가 있습니다.</b> 아래에서 거점센터·대표상품명을 지정하면 마스터에 저장되고 다음부터 자동 적용됩니다.
-    <div class="muted" style="margin-top:4px">미매핑 항목은 라벨에서 거점/대표가 비어 있게 됩니다.</div>
+    {% if unmapped_products %}
+    <div style="margin-top:4px;font-weight:600;color:#dc2626">
+      한익스상품명이 없는 상품이 있어 출력이 차단되었습니다. 표지에는 항상 한익스상품명만 들어가므로,
+      아래 미매핑 상품을 모두 등록해야 다운로드·인쇄할 수 있습니다.
+    </div>
+    {% else %}
+    <div class="muted" style="margin-top:4px">미매핑 센터는 라벨에서 이고센터가 비어 있게 됩니다.</div>
+    {% endif %}
   </div>
 
   <form method="post" action="{{ url_for('assign', ch=ch, token=token) }}" style="margin-top:16px">
     {% if unmapped_centers %}
     <h2 style="margin-top:8px">미매핑 센터 ({{ unmapped_centers|length }})</h2>
     <table>
-      <tr><th style="width:26%">{{ '센터코드' if center_key=='code' else '입고센터명' }}</th>
-          <th style="width:34%">센터명(참고)</th><th>거점센터 지정</th></tr>
-      {% for code,nm in unmapped_centers.items() %}
+      <tr><th style="width:36%">센터명</th>
+          <th style="width:24%">센터코드(참고)</th><th>이고센터 지정</th></tr>
+      {% for nm,code in unmapped_centers.items() %}
       <tr>
-        <td><code class="k">{{ code }}</code></td>
-        <td class="muted">{{ nm }}</td>
+        <td><code class="k">{{ nm }}</code></td>
+        <td class="muted">{{ code or '—' }}</td>
         <td>
-          <input list="hublist" type="text" name="center::{{ code }}" placeholder="예: 이천센터">
+          <input list="hublist" type="text" name="center::{{ nm }}" placeholder="예: 이천센터">
         </td>
       </tr>
       {% endfor %}
@@ -50,22 +62,43 @@
 
     {% if unmapped_products %}
     <h2 style="margin-top:18px">미매핑 상품 ({{ unmapped_products|length }})</h2>
+    <div class="muted" style="margin-bottom:6px;font-size:13px">
+      같은 상품이라도 <b>채널마다 상품코드가 다릅니다.</b> 이미 등록된 상품이면 한익스상품명을
+      <b>목록에서 선택</b>하세요 — 기존 상품에 이 채널 코드가 추가됩니다.
+      직접 타이핑해 이름이 조금이라도 다르면 표지에서 다른 상품으로 집계됩니다.
+    </div>
     <table>
-      <tr><th style="width:20%">상품코드</th><th style="width:30%">화주상품명(원본·라벨표시)</th>
-          <th>대표=한익스상품명(표지표시)</th><th style="width:130px">구분</th></tr>
+      <tr><th style="width:19%">상품코드</th><th style="width:28%">화주상품명(원본·라벨표시)</th>
+          <th>한익스상품명(표지표시)</th><th style="width:130px">구분</th></tr>
       {% for code,nm in unmapped_products.items() %}
       <tr>
         <td><code class="k">{{ code }}</code></td>
         <td class="muted">{{ nm }}</td>
-        <td><input type="text" name="prod::{{ code }}" value="{{ nm }}"></td>
+        <td><input list="replist" type="text" name="prod::{{ code }}" data-rep
+                   placeholder="기존 상품 선택 또는 새 이름 입력"></td>
         <td>
-          <select name="pcat::{{ code }}">
+          <select name="pcat::{{ code }}" data-cat="{{ code }}">
             {% for c in product_cats %}<option value="{{ c }}">{{ c }}직매장</option>{% endfor %}
           </select>
         </td>
       </tr>
       {% endfor %}
     </table>
+    <datalist id="replist">
+      {% for r in rep_cats %}<option value="{{ r }}">{% endfor %}
+    </datalist>
+    <script>
+      // 기존 상품명을 고르면 그 상품의 구분(대월/프리미엄)을 자동으로 맞춘다
+      const REP_CATS = {{ rep_cats|tojson }};
+      document.querySelectorAll('input[data-rep]').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const cat = REP_CATS[inp.value.trim()];
+          if (!cat) return;
+          const sel = inp.closest('tr').querySelector('select[data-cat]');
+          if (sel) sel.value = cat;
+        });
+      });
+    </script>
     {% endif %}
 
     <datalist id="hublist">
@@ -74,8 +107,12 @@
 
     <div class="row" style="margin-top:16px">
       <button class="btn" type="submit">매핑 저장 후 재확인</button>
+      {% if unmapped_products %}
+      <span class="muted">한익스상품명 등록 전에는 다운로드·인쇄가 차단됩니다.</span>
+      {% else %}
       <a class="btn gray" href="{{ url_for('download', ch=ch, token=token) }}">그대로 다운로드</a>
       <a class="btn" href="{{ url_for('print_labels', ch=ch, token=token) }}" target="_blank">🖨 라벨 미리보기·인쇄</a>
+      {% endif %}
     </div>
   </form>
   {% endif %}

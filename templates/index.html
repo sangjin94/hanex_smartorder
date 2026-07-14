@@ -2,7 +2,7 @@
 {% block body %}
 <div class="card">
   <h1>판매채널을 선택하세요</h1>
-  <div class="sub">RAW 파일을 업로드하면 <b>코드 기반 매핑</b>(센터코드→거점센터, 상품코드→대표상품명)으로 부착양식(A4) 라벨을 생성합니다.</div>
+  <div class="sub">RAW 파일을 업로드하면 <b>센터명 → 이고센터</b>, <b>상품코드 → 한익스상품명</b> 매핑으로 부착양식(A4) 라벨을 생성합니다.</div>
 
   <div class="grid">
     {% set colors = {'cu':'#7c3aed','gs':'#0891b2','e24':'#ea580c'} %}
@@ -10,8 +10,8 @@
     <a class="chcard" style="background:linear-gradient(135deg,{{colors[ch]}},{{colors[ch]}}cc)" href="{{ url_for('upload', ch=ch) }}">
       <div class="big">{{ cfg[ch].name }}</div>
       <div class="meta">
-        등록 센터 {{ stats[ch].centers }}개<br>
-        {% if cfg[ch].center_key=='code' %}센터코드 기반 매핑{% else %}입고센터명 기반 매핑{% endif %}
+        {{ cfg[ch].center_label }} 라벨<br>
+        센터명 기반 매핑
       </div>
       <div class="go">→</div>
     </a>
@@ -19,8 +19,8 @@
   </div>
 
   <div class="stat" style="margin-top:22px">
-    <div><div class="n">{{ products }}</div><div class="l">공통 상품마스터 (코드→대표)</div></div>
-    <div><div class="n">{{ stats.cu.centers + stats.gs.centers + stats.e24.centers }}</div><div class="l">센터 매핑 합계</div></div>
+    <div><div class="n">{{ products }}</div><div class="l">공통 상품마스터 (코드→한익스상품명)</div></div>
+    <div><div class="n">{{ centers }}</div><div class="l">공통 센터마스터 (센터명→이고센터)</div></div>
   </div>
 </div>
 
