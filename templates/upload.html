@@ -20,6 +20,26 @@
       <button class="btn big" type="submit">라벨 생성 →</button>
     </div>
   </form>
+
+  {% if recent %}
+  <div style="margin-top:20px">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0;font-size:15px">최근 업로드 ({{ cfg.name }})</h2>
+      <a class="muted" href="{{ url_for('history', ch=ch) }}">전체 이력 →</a>
+    </div>
+    <table style="margin-top:8px">
+      <tr><th style="width:150px">일시</th><th>파일명</th><th style="width:60px;text-align:right">라벨</th><th style="width:70px">열기</th></tr>
+      {% for r in recent %}
+      <tr>
+        <td class="muted">{{ r.uploaded_at }}</td>
+        <td>{{ r.orig }}</td>
+        <td style="text-align:right">{{ r.nrows if r.nrows is not none else '-' }}</td>
+        <td><a href="{{ url_for('result', ch=ch, token=r.id) }}">열기</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-top:14px">

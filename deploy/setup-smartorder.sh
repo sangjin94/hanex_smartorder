@@ -18,8 +18,8 @@ python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -r requirements.txt
 
-echo "[4/7] 마스터 영구 디렉터리(git 밖) + 시드"
-mkdir -p "$DATADIR"
+echo "[4/7] 마스터 영구 디렉터리(git 밖) + 시드 · 업로드 아카이브"
+mkdir -p "$DATADIR" /home/ubuntu/hanex_smartorder_data/archive
 for f in "$APPDIR"/masters/*.json; do
   bn=$(basename "$f"); [ -f "$DATADIR/$bn" ] || cp "$f" "$DATADIR/$bn"
 done

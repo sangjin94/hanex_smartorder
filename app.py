@@ -6,7 +6,7 @@
  - 업로드 중 미매핑 센터/상품 코드를 화면에서 즉시 마스터에 등록
  - 마스터 관리(센터코드→거점센터, 상품코드→대표상품명) 조회/추가/수정/삭제
 """
-import os, io, uuid, datetime, tempfile
+import os, io, json, re, uuid, datetime
 from flask import (Flask, request, render_template, send_file, redirect,
                    url_for, flash, jsonify, abort)
 import smartorder_core as sc
@@ -28,19 +28,39 @@ app.wsgi_app = PrefixMiddleware(app.wsgi_app)
 
 sc.ensure_masters_seeded()
 
-UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "hanex_smartorder_uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-JOBS = {}   # token -> {channel, path, filename, created}
-
 CH_ORDER = ["cu", "gs", "e24"]
 
-def _cleanup():
-    now = datetime.datetime.now()
-    for tok, job in list(JOBS.items()):
-        if (now - job["created"]).total_seconds() > 6 * 3600:
-            try: os.remove(job["path"])
-            except Exception: pass
-            JOBS.pop(tok, None)
+# ---------------- 업로드 아카이브(영구 누적) ----------------
+# 배포 시 git 밖 영구 디렉터리로 분리(SMARTORDER_ARCHIVE). 기본은 앱 폴더 archive/.
+ARCHIVE_DIR = os.environ.get("SMARTORDER_ARCHIVE") or os.path.join(sc.BASE, "archive")
+INDEX_PATH = os.path.join(ARCHIVE_DIR, "index.json")
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+def _load_index():
+    if not os.path.exists(INDEX_PATH):
+        return []
+    try:
+        with open(INDEX_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_index(items):
+    with open(INDEX_PATH, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=1)
+
+def _safe_name(name):
+    base = os.path.basename(name)
+    return re.sub(r'[\\/:*?"<>|]+', "_", base).strip() or "raw"
+
+def _rec_by_id(uid):
+    for r in _load_index():
+        if r["id"] == uid:
+            return r
+    return None
+
+def _rec_path(rec):
+    return os.path.join(ARCHIVE_DIR, rec["ch"], rec["fname"])
 
 
 @app.route("/")
@@ -63,7 +83,8 @@ def upload(ch):
         abort(404)
     cfg = sc.CHANNELS[ch]
     if request.method == "GET":
-        return render_template("upload.html", ch=ch, cfg=cfg)
+        recent = [r for r in reversed(_load_index()) if r["ch"] == ch][:8]
+        return render_template("upload.html", ch=ch, cfg=cfg, recent=recent)
 
     f = request.files.get("file")
     if not f or not f.filename:
@@ -74,20 +95,40 @@ def upload(ch):
         flash("xlsx 또는 xls 파일만 업로드할 수 있습니다.", "error")
         return redirect(url_for("upload", ch=ch))
 
-    _cleanup()
-    token = uuid.uuid4().hex
-    path = os.path.join(UPLOAD_DIR, token + ext)
+    # 채널 폴더에 영구 저장(누적)
+    now = datetime.datetime.now()
+    uid = "%s_%s_%s" % (ch, now.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:4])
+    fname = uid + "__" + _safe_name(f.filename)
+    os.makedirs(os.path.join(ARCHIVE_DIR, ch), exist_ok=True)
+    path = os.path.join(ARCHIVE_DIR, ch, fname)
     f.save(path)
-    JOBS[token] = {"channel": ch, "path": path, "filename": f.filename,
-                   "created": datetime.datetime.now()}
-    return redirect(url_for("result", ch=ch, token=token))
+
+    # 통계 미리 계산(이력 표시용) — 실패해도 파일은 보관
+    nrec = nrows = total_qty = None
+    try:
+        records = sc.parse_raw(path, ch)
+        rows, uc, up = sc.process(records, ch)
+        nrec, nrows = len(records), len(rows)
+        total_qty = sum(r["수량"] for r in rows if isinstance(r["수량"], (int, float)))
+    except Exception:
+        pass
+
+    idx = _load_index()
+    idx.append({"id": uid, "ch": ch, "orig": f.filename, "fname": fname,
+                "uploaded_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "nrec": nrec, "nrows": nrows, "total_qty": total_qty})
+    _save_index(idx)
+    return redirect(url_for("result", ch=ch, token=uid))
 
 
 def _load_job(ch, token):
-    job = JOBS.get(token)
-    if not job or job["channel"] != ch or not os.path.exists(job["path"]):
+    rec = _rec_by_id(token)
+    if not rec or rec["ch"] != ch:
         return None
-    return job
+    path = _rec_path(rec)
+    if not os.path.exists(path):
+        return None
+    return {"channel": ch, "path": path, "filename": rec["orig"]}
 
 
 @app.route("/r/<ch>/<token>")
@@ -180,6 +221,46 @@ def download(ch, token):
     fname = "%s_스마트오더_부착양식_%s.xlsx" % (cfg["name"], today)
     return send_file(bio, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ---------------- 업로드 이력(누적 파일) ----------------
+@app.route("/history")
+def history():
+    ch = request.args.get("ch", "")
+    items = list(reversed(_load_index()))
+    if ch in sc.CHANNELS:
+        items = [r for r in items if r["ch"] == ch]
+    counts = {}
+    for r in _load_index():
+        counts[r["ch"]] = counts.get(r["ch"], 0) + 1
+    return render_template("history.html", items=items, cfg=sc.CHANNELS,
+                           channels=CH_ORDER, sel=ch, counts=counts)
+
+
+@app.route("/history/raw/<uid>")
+def history_raw(uid):
+    rec = _rec_by_id(uid)
+    if not rec:
+        abort(404)
+    path = _rec_path(rec)
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=rec["orig"])
+
+
+@app.route("/history/delete/<uid>", methods=["POST"])
+def history_delete(uid):
+    idx = _load_index()
+    rec = next((r for r in idx if r["id"] == uid), None)
+    if rec:
+        try:
+            os.remove(_rec_path(rec))
+        except Exception:
+            pass
+        idx = [r for r in idx if r["id"] != uid]
+        _save_index(idx)
+        flash("삭제했습니다: %s" % rec["orig"], "ok")
+    return redirect(url_for("history", ch=request.form.get("ch", "")))
 
 
 # ---------------- 마스터 관리 ----------------

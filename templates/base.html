@@ -72,6 +72,7 @@
   <div class="logo">🏷️ 스마트오더 라벨 <small>한익스프레스 · 대월직매장</small></div>
   <nav>
     <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint=='index' }}">라벨생성</a>
+    <a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint=='history' }}">업로드이력</a>
     <a href="{{ url_for('masters') }}" class="{{ 'active' if request.endpoint in ['masters','master_edit'] }}">마스터관리</a>
   </nav>
 </header>
