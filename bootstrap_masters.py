@@ -1,199 +1,141 @@
 # -*- coding: utf-8 -*-
-"""기존 OB스마트오더 자동화 파일에서 코드 기반 마스터를 부트스트랩한다.
- - masters/center_cu.json   : {센터코드: 거점센터}
- - masters/center_gs.json   : {센터코드: 거점센터}   (GS25 VA코드 + GS슈퍼 숫자코드 통합)
- - masters/center_e24.json  : {입고센터명: 거점센터}  (E24는 센터코드가 없어 명칭키)
- - masters/product.json     : {상품코드: 대표상품명}   (전 채널 통합)
- - masters/center_name_hint_*.json : {센터코드: 센터명}  참고용(관리 UI 표시)
+"""원본 'OB스마트오더 자동화' 엑셀에서 마스터를 재생성한다(1회용 / 복구용).
+
+생성물 (masters/)
+ - center.json        : {센터명: 이고센터}      전 채널 공통. 원본 '점포마스터' 시트가 원 출처
+ - product.json       : {상품코드: {rep, cat}}  전 채널 공통. 같은 상품이라도 채널마다 코드가 다름
+ - product_names.json : {화주상품명: {rep, cat}} 상품코드 미등록 시 이름 폴백
+
+사용:  py bootstrap_masters.py [원본폴더]
+      (생략 시 SMARTORDER_SRC 환경변수 → 바탕화면 'OB스마트오더 자동화')
 """
-import openpyxl, xlrd, os, json, io
+import os, sys, io
+import openpyxl
+import smartorder_core as sc
 
-SRC = r"C:\Users\HanEx\Desktop\OB스마트오더 자동화"
-OUT = os.path.join(os.path.dirname(__file__), "masters")
-os.makedirs(OUT, exist_ok=True)
+DEFAULT_SRC = os.path.join(os.path.expanduser("~"), "Desktop", "OB스마트오더 자동화")
+SRC = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SMARTORDER_SRC") or DEFAULT_SRC)
+
+# 출력양식 파일: 점포마스터(센터명→이고센터) + 상품마스터(대표) + lowdata(라벨출력) 보유
+FORMS = [
+    ("cu",  "(CU)스마트오더 출력양식.xlsx",     "점포마스터"),
+    ("gs",  "GS 스마트오더 출력양식.xlsx",      "점포마스터"),
+    ("e24", "이마트24 스마트오더 출력양식.xlsx", "E24 점포마스터"),
+]
+# 리테일러가 보내주는 RAW 원본(상품코드 수집용)
+RAWS = [
+    ("cu",  "CU 스마트오더.xlsx"),
+    ("gs",  "GS 스마트오더.xls"),
+    ("e24", "이마트24 스마트오더.xlsx"),
+]
+# 원본 점포마스터의 알려진 오류 교정 — 제주 물량은 이천센터에서 나간다.
+# (시트에 같은 센터명이 '제주도'/'제주센터'로도 중복 등록돼 있음)
+CENTER_OVERRIDES = {
+    "BGF로지스제주": "이천센터",
+    "BGF로지스서귀포": "이천센터",
+    "서귀포센터": "이천센터",
+    "제주센터": "이천센터",
+    "제주주류": "이천센터",
+    "지에스리테일신제주애월상온": "이천센터",
+}
+
 log = io.StringIO()
-def L(*a): print(*a, file=log)
+def L(*a):
+    print(*a, file=log)
+    # 콘솔이 cp949라 한글 외 기호에서 죽는 경우가 있어 안전 출력
+    try:
+        print(*a)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "utf-8"
+        print(" ".join(str(x) for x in a).encode(enc, "replace").decode(enc))
 
-def norm(v):
-    if v is None: return ""
-    s = str(v).strip()
-    if s.endswith(".0") and s[:-2].isdigit(): s = s[:-2]
-    return s
 
-def load_xlsx(path, sheet):
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    ws = wb[sheet]
-    rows = [list(r) for r in ws.iter_rows(values_only=True)]
-    wb.close()
-    return rows
+def sheet(path, name):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    return wb[name]
 
-# ---------- 1) 점포마스터: 리테일러 센터명 -> 거점센터 ----------
-def name2hub_from_master(path, sheet, name_col=3, hub_col=6):
-    rows = load_xlsx(path, sheet)
-    m = {}
-    for r in rows[1:]:
-        if len(r) <= hub_col: continue
-        name = norm(r[name_col]); hub = norm(r[hub_col])
-        if name and hub and name not in m:
-            m[name] = hub
-    return m
 
-cu_n2h = name2hub_from_master(os.path.join(SRC,"(CU)스마트오더 출력양식.xlsx"), "점포마스터")
-gs_n2h = name2hub_from_master(os.path.join(SRC,"GS 스마트오더 출력양식.xlsx"), "점포마스터")
-e24_n2h = name2hub_from_master(os.path.join(SRC,"이마트24 스마트오더 출력양식.xlsx"), "E24 점포마스터")
-L("점포마스터 name->hub  CU:%d  GS:%d  E24:%d" % (len(cu_n2h), len(gs_n2h), len(e24_n2h)))
+# ---------- 1) 센터마스터: 점포마스터 D(센터명) → G(지방거점) ----------
+center = {}
+for _, fn, sh in FORMS:
+    ws = sheet(os.path.join(SRC, fn), sh)
+    n = 0
+    for r in range(2, ws.max_row + 1):
+        nm = sc.norm(ws.cell(r, 4).value)
+        hub = sc.norm(ws.cell(r, 7).value)
+        if nm and hub and nm not in center:   # 시트에 중복 행이 있어 first-wins
+            center[nm] = hub
+            n += 1
+    L("점포마스터 %-30s → 신규 센터 %d개" % (sh + "(" + fn + ")", n))
+center.update(CENTER_OVERRIDES)
+L("센터마스터: %d개 · 이고센터 %s" % (len(center), sorted(set(center.values()))))
 
-# ---------- 2) 상품마스터: 상품명 -> (대표, 구분) ----------
-def prodname2rep(path, sheet="상품마스터(대표)"):
-    rows = load_xlsx(path, sheet)
-    m = {}
-    for r in rows[1:]:
-        if len(r) < 2: continue
-        name = norm(r[0]); rep = norm(r[1])
-        cat = norm(r[2]) if len(r) > 2 else ""
-        cat = cat if cat in ("대월", "프리미엄") else "대월"
-        if name and rep and name not in m:
-            m[name] = (rep, cat)
-    return m
-pn2rep = prodname2rep(os.path.join(SRC,"GS 스마트오더 출력양식.xlsx"))
-from collections import Counter as _C
-L("상품마스터 name->(rep,cat) : %d  구분분포=%s" % (len(pn2rep), dict(_C(c for _,c in pn2rep.values()))))
+# ---------- 2) 화주상품명 → (한익스상품명, 구분) : GS 파일 '상품마스터(대표)' ----------
+pn2rep = {}
+ws = sheet(os.path.join(SRC, "GS 스마트오더 출력양식.xlsx"), "상품마스터(대표)")
+for r in range(2, ws.max_row + 1):
+    name = sc.norm(ws.cell(r, 1).value)   # 제품(화주상품명)
+    rep = sc.norm(ws.cell(r, 2).value)    # 대표(한익스상품명)
+    cat = sc.norm(ws.cell(r, 3).value)
+    cat = cat if cat in sc.PRODUCT_CATS else sc.DEFAULT_CAT
+    if name and rep and name not in pn2rep:
+        pn2rep[name] = {"rep": rep, "cat": cat}
+L("화주상품명 → 한익스상품명: %d개" % len(pn2rep))
 
-# ---------- 3) CU: 센터코드->센터명 (발주확인 시트) ----------
-def cols_by_header(rows, header_row, wanted):
-    """헤더행에서 원하는 라벨의 컬럼 index를 부분일치로 찾는다."""
-    hdr = [norm(x) for x in rows[header_row]]
-    idx = {}
-    for key, cands in wanted.items():
-        for i, h in enumerate(hdr):
-            if any(c in h for c in cands):
-                idx[key] = i; break
-    return idx
-
-cu_rows = load_xlsx(os.path.join(SRC,"CU 스마트오더.xlsx"), "발주확인 및 확정내역(스티커제작용)")
-cu_idx = cols_by_header(cu_rows, 0, {"code":["센터 코드","센터코드"], "name":["센터명"], "pcode":["상품 코드","상품코드"], "pname":["상품명"]})
-L("CU 헤더 idx: %s" % cu_idx)
-cu_code2hub = {}; cu_code2name = {}; cu_pcode2rep = {}; cu_unmapped_center=set(); cu_unmapped_prod=set()
-for r in cu_rows[2:]:
-    if len(r) <= max(cu_idx.values()): continue
-    code = norm(r[cu_idx["name"]] if False else r[cu_idx["code"]]); name = norm(r[cu_idx["name"]])
-    if code and name:
-        cu_code2name.setdefault(code, name)
-        hub = cu_n2h.get(name)
-        if hub: cu_code2hub[code] = hub
-        else: cu_unmapped_center.add((code,name))
-    pcode = norm(r[cu_idx["pcode"]]); pname = norm(r[cu_idx["pname"]])
-    if pcode and pname:
-        rep = pn2rep.get(pname)
-        if rep: cu_pcode2rep[pcode] = rep
-        else: cu_unmapped_prod.add((pcode,pname))
-L("CU 센터코드->hub: %d (미매핑 %d)  상품코드->대표: %d (미매핑 %d)" %
-  (len(cu_code2hub), len(cu_unmapped_center), len(cu_pcode2rep), len(cu_unmapped_prod)))
-
-# ---------- 4) GS슈퍼 lowdata: 센터코드->센터 ----------
-gs_code2hub = {}; gs_code2name = {}; gs_pcode2rep = {}; gs_unmapped_center=set(); gs_unmapped_prod=set()
-gsl = load_xlsx(os.path.join(SRC,"GS 스마트오더 출력양식.xlsx"), "lowdata(라벨출력)")
-gs_idx = cols_by_header(gsl, 0, {"code":["센터코드"], "name":["센터"], "pcode":["상품코드"], "pname":["상품명"]})
-# '센터' 부분일치가 '센터코드'를 먼저 잡을 수 있어 재조정
-def find_exact(rows, label):
-    hdr=[norm(x) for x in rows[0]]
-    for i,h in enumerate(hdr):
-        if h==label: return i
-    return None
-gs_idx["code"]=find_exact(gsl,"센터코드"); gs_idx["name"]=find_exact(gsl,"센터")
-gs_idx["pcode"]=find_exact(gsl,"상품코드"); gs_idx["pname"]=find_exact(gsl,"상품명")
-L("GS슈퍼 헤더 idx: %s" % gs_idx)
-for r in gsl[1:]:
-    code=norm(r[gs_idx["code"]]); name=norm(r[gs_idx["name"]])
-    if code and name:
-        gs_code2name.setdefault(code,name)
-        hub=gs_n2h.get(name)
-        if hub: gs_code2hub[code]=hub
-        else: gs_unmapped_center.add((code,name))
-    pcode=norm(r[gs_idx["pcode"]]); pname=norm(r[gs_idx["pname"]])
-    if pcode and pname:
-        rep=pn2rep.get(pname)
-        if rep: gs_pcode2rep[pcode]=rep
-        else: gs_unmapped_prod.add((pcode,pname))
-
-# ---------- 5) GS25 .xls: 센터코드(VA..)->센터 ----------
-def load_xls(path):
-    wb=xlrd.open_workbook(path); ws=wb.sheet_by_index(0)
-    return [[ws.cell_value(i,j) for j in range(ws.ncols)] for i in range(ws.nrows)]
-g25=load_xls(os.path.join(SRC,"GS 스마트오더.xls"))
-h=[norm(x) for x in g25[0]]
-def gi(label):
-    for i,x in enumerate(h):
-        if x==label: return i
-    return None
-c_code=gi("센터코드"); c_name=gi("센터"); c_pcode=gi("상품코드"); c_pname=gi("상품명")
-L("GS25 헤더 idx: code=%s name=%s pcode=%s pname=%s" % (c_code,c_name,c_pcode,c_pname))
-for r in g25[1:]:
-    code=norm(r[c_code]); name=norm(r[c_name])
-    if code and name:
-        gs_code2name.setdefault(code,name)
-        hub=gs_n2h.get(name)
-        if hub: gs_code2hub[code]=hub
-        else: gs_unmapped_center.add((code,name))
-    pcode=norm(r[c_pcode]); pname=norm(r[c_pname])
-    if pcode and pname:
-        rep=pn2rep.get(pname)
-        if rep: gs_pcode2rep[pcode]=rep
-        else: gs_unmapped_prod.add((pcode,pname))
-L("GS 센터코드->hub: %d (미매핑 %d)  상품코드->대표: %d (미매핑 %d)" %
-  (len(gs_code2hub), len(gs_unmapped_center), len(gs_pcode2rep), len(gs_unmapped_prod)))
-
-# ---------- 6) E24: 입고센터명->hub (점포마스터 GS점포명 컬럼이 곧 입고센터명) ----------
-e24_center = dict(e24_n2h)   # {'양산(상온)': '양산센터', ...}
-# E24 상품코드->대표 (lowdata)
-e24_pcode2rep={}; e24_unmapped_prod=set()
-e24l=load_xlsx(os.path.join(SRC,"이마트24 스마트오더 출력양식.xlsx"), "lowdata(라벨출력)")
-eh=[norm(x) for x in e24l[0]]
-def ei(*labels):
-    for i,x in enumerate(eh):
-        if x in labels: return i
-    return None
-ep=ei("상품코드"); en=ei("앱 상품명","앱상품명"); erep=ei("상품명(대표)")
-for r in e24l[1:]:
-    if ep is None: break
-    pcode=norm(r[ep]) if ep<len(r) else ""
-    if not pcode: continue
-    appname = norm(r[en]) if (en is not None and en<len(r)) else ""
-    pr = pn2rep.get(appname)                        # (rep, cat)
-    if pr is None:
-        rep = norm(r[erep]) if (erep is not None and erep<len(r)) else ""
-        if rep: pr = (rep, "대월")
-    if pr: e24_pcode2rep[pcode]=pr
-L("E24 입고센터->hub: %d   상품코드->대표: %d" % (len(e24_center), len(e24_pcode2rep)))
-
-# ---------- 통합 상품마스터: {코드: {rep, cat}} ----------
+# ---------- 3) 상품마스터: 상품코드 → {rep, cat} ----------
+# 같은 상품이라도 채널마다 코드가 달라, 여러 코드가 같은 rep을 가리킨다.
 product = {}
-for d in (cu_pcode2rep, gs_pcode2rep, e24_pcode2rep):
-    for code,(rep,cat) in d.items():
-        product[code] = {"rep": rep, "cat": cat}
-from collections import Counter as _C2
-L("통합 상품코드->{대표,구분}: %d  구분분포=%s" % (len(product), dict(_C2(v['cat'] for v in product.values()))))
+unmapped = set()
+sources = [(ch, os.path.join(SRC, fn)) for ch, fn, _ in FORMS]
+sources += [(ch, os.path.join(SRC, fn)) for ch, fn in RAWS]
+for ch, path in sources:
+    if not os.path.exists(path):
+        L("  (건너뜀, 파일 없음) %s" % os.path.basename(path))
+        continue
+    try:
+        recs = sc.parse_raw(path, ch)
+    except Exception as e:
+        L("  (건너뜀, 파싱 실패) %s: %s" % (os.path.basename(path), e))
+        continue
+    added = 0
+    for rec in recs:
+        code, name = rec["prod_code"], rec["prod_name"]
+        if not code or code in product:
+            continue
+        v = pn2rep.get(name)
+        if v:
+            product[code] = dict(v)
+            added += 1
+        else:
+            unmapped.add((code, name))
+    L("  %-30s 레코드 %4d → 신규 상품코드 %d" % (os.path.basename(path), len(recs), added))
 
-def dump(name, obj):
-    with open(os.path.join(OUT,name),"w",encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=1, sort_keys=True)
+reps = {v["rep"] for v in product.values()}
+L("상품마스터: 코드 %d개 / 한익스상품명 %d개 (같은 상품의 채널별 코드가 묶임)" % (len(product), len(reps)))
+if unmapped:
+    L("한익스상품명을 못 찾은 코드 %d개 (화면에서 등록 필요):" % len(unmapped))
+    for code, name in sorted(unmapped)[:20]:
+        L("   %s  %s" % (code, name))
 
-dump("center_cu.json", cu_code2hub)
-dump("center_gs.json", gs_code2hub)
-dump("center_e24.json", e24_center)
-dump("product.json", product)
-# 보조 시드: 화주상품명 -> {대표, 구분}. 코드 미등록 시 이름으로 폴백(특히 프리미엄 자동분류)
-dump("product_names.json", {name: {"rep": rep, "cat": cat} for name, (rep, cat) in pn2rep.items()})
-dump("center_cu_names.json", cu_code2name)
-dump("center_gs_names.json", gs_code2name)
-# 미매핑 목록(참고)
-dump("_unmapped.json", {
-    "cu_center":[list(x) for x in sorted(cu_unmapped_center)],
-    "gs_center":[list(x) for x in sorted(gs_unmapped_center)],
-    "cu_prod":[list(x) for x in sorted(cu_unmapped_prod)][:50],
-    "gs_prod":[list(x) for x in sorted(gs_unmapped_prod)][:50],
-})
+# ---------- 저장 ----------
+# 재실행해도 화면에서 사람이 등록/수정한 매핑이 날아가지 않도록 '기존 값 우선' 병합.
+# (빈 마스터면 전체 생성, 이미 있으면 빠진 항목만 채움. 단 CENTER_OVERRIDES는 항상 적용)
+def merge_save(fname, fresh, force=None):
+    cur = sc.load_master(fname)
+    added = 0
+    for k, v in fresh.items():
+        if k not in cur:
+            cur[k] = v
+            added += 1
+    if force:
+        cur.update(force)
+    sc.save_master(fname, cur)
+    L("  %-20s 기존 %d개 유지 + 신규 %d개 → 총 %d개" % (fname, len(cur) - added, added, len(cur)))
 
-with open(os.path.join(os.path.dirname(__file__),"bootstrap_log.txt"),"w",encoding="utf-8") as f:
+L("저장(기존 값 우선 병합) → %s" % sc.MASTER_DIR)
+merge_save(sc.CENTER_MASTER, center, force=CENTER_OVERRIDES)
+merge_save("product.json", product)
+merge_save("product_names.json", pn2rep)
+
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bootstrap_log.txt"), "w", encoding="utf-8") as f:
     f.write(log.getvalue())
-print("OK")

@@ -205,6 +205,7 @@ def _read_any(path):
         return ws.name, [[ws.cell_value(i, j) for j in range(ws.ncols)] for i in range(ws.nrows)]
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     ws = wb.active
+    ws.reset_dimensions()   # 시트 크기를 A1:A1로 잘못 써두는 RAW가 있어(E24) 선언값을 믿지 않는다
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
     name = ws.title
     wb.close()
@@ -233,6 +234,7 @@ def _pick_sheet(path, hints):
     for ws in wb.worksheets:
         if any(h in ws.title for h in hints):
             target = ws; break
+    target.reset_dimensions()   # 시트 크기를 A1:A1로 잘못 써두는 RAW가 있어(E24) 선언값을 믿지 않는다
     rows = [list(r) for r in target.iter_rows(values_only=True)]
     name = target.title
     wb.close()
