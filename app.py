@@ -317,15 +317,10 @@ def master_edit(which):
     data = sc.load_master(d["file"])
     q = request.args.get("q", "").strip()
     reps = []
-    # 상품 마스터: 같은 상품이 채널마다 코드가 달라 → 한익스상품명으로 묶어서 보여준다
+    # 상품 마스터: 상품 1개 = 1행. 같은 상품이라도 채널마다 코드가 달라 코드는 한 칸에 모아 보여준다
     if d["kind"] == "product":
-        groups = {}
-        for code in sorted(data):
-            rep, cat = sc.product_rep_cat(data, code)
-            g = groups.setdefault(rep or "", {"rep": rep or "", "cat": cat or sc.DEFAULT_CAT, "codes": []})
-            g["codes"].append(code)
-        reps = sorted(groups)
-        items = sorted(groups.values(), key=lambda g: g["rep"])
+        items = sc.product_groups()
+        reps = [g["rep"] for g in items]
         if q:
             ql = q.lower()
             items = [g for g in items
@@ -353,50 +348,57 @@ def master_save(which):
     data = sc.load_master(d["file"])
     is_prod = d["kind"] == "product"
     act = request.form.get("action")
+
+    def save_product(old_rep):
+        """상품 1건(이름·구분·코드들)을 통째로 저장. old_rep이 있으면 그 상품을 교체."""
+        rep = request.form.get("value", "").strip()
+        cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+        codes = sc.split_codes(request.form.get("codes", ""))
+        if not rep or not codes:
+            flash("한익스상품명과 상품코드를 모두 입력해 주세요.", "error")
+            return
+        mine = {c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old_rep} if old_rep else set()
+        dup = [c for c in codes if c in data and c not in mine]
+        if dup:
+            flash("상품코드 %s 는 이미 다른 상품에 등록돼 있습니다." % ", ".join(dup), "error")
+            return
+        for c in mine:                       # 이 상품에서 빠진 코드는 제거
+            data.pop(c)
+        for c in codes:
+            data[c] = {"rep": rep, "cat": cat}
+        flash("저장: %s (%s) · 상품코드 %d개" % (rep, cat, len(codes)), "ok")
+
     if act == "add":
-        k = request.form.get("key", "").strip()
-        v = request.form.get("value", "").strip()
-        if k and v:
-            if is_prod:
-                cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
-                data[k] = {"rep": v, "cat": cat}
-                flash("추가: %s → %s (%s)" % (k, v, cat), "ok")
-            else:
+        if is_prod:
+            save_product(None)
+        else:
+            k = request.form.get("key", "").strip()
+            v = request.form.get("value", "").strip()
+            if k and v:
                 data[k] = v
                 flash("추가: %s → %s" % (k, v), "ok")
     elif act == "update":
-        k = request.form.get("key", "").strip()
-        v = request.form.get("value", "").strip()
-        if k in data and v:
-            if is_prod:
-                cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
-                data[k] = {"rep": v, "cat": cat}
-                flash("수정: %s → %s (%s)" % (k, v, cat), "ok")
-            else:
+        if is_prod:
+            save_product(request.form.get("old_rep", "").strip())
+        else:
+            k = request.form.get("key", "").strip()
+            v = request.form.get("value", "").strip()
+            if k in data and v:
                 data[k] = v
                 flash("수정: %s → %s" % (k, v), "ok")
-    elif act == "update_group" and is_prod:
-        # 한익스상품명/구분 일괄 수정 — 그 상품의 채널별 코드 전부에 적용
-        old = request.form.get("old_rep", "").strip()
-        v = request.form.get("value", "").strip()
-        cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
-        codes = [c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old]
-        if v and codes:
-            for c in codes:
-                data[c] = {"rep": v, "cat": cat}
-            flash("수정: %s → %s (%s) · 코드 %d개 적용" % (old, v, cat, len(codes)), "ok")
-    elif act == "delete_group" and is_prod:
-        old = request.form.get("old_rep", "").strip()
-        codes = [c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old]
-        for c in codes:
-            data.pop(c)
-        if codes:
-            flash("삭제: %s (코드 %d개)" % (old, len(codes)), "ok")
     elif act == "delete":
-        k = request.form.get("key", "").strip()
-        if k in data:
-            data.pop(k)
-            flash("삭제: %s" % k, "ok")
+        if is_prod:
+            old = request.form.get("old_rep", "").strip()
+            codes = [c for c in data if (sc.product_rep_cat(data, c)[0] or "") == old]
+            for c in codes:
+                data.pop(c)
+            if codes:
+                flash("삭제: %s (상품코드 %d개)" % (old, len(codes)), "ok")
+        else:
+            k = request.form.get("key", "").strip()
+            if k in data:
+                data.pop(k)
+                flash("삭제: %s" % k, "ok")
     sc.save_master(d["file"], data)
     return redirect(url_for("master_edit", which=which, q=request.form.get("q", "")))
 

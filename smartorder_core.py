@@ -204,23 +204,41 @@ MASTER_KINDS = {
     },
     "product": {
         "file": "product.json",
-        "headers": ["상품코드", "한익스상품명", "구분"],
-        "help": "같은 상품이라도 채널마다 상품코드가 다릅니다. 코드 1개 = 1행이며, "
-                "같은 상품이면 한익스상품명을 똑같이 적으세요(다르면 표지에서 다른 상품으로 집계).",
+        "headers": ["한익스상품명", "구분", "상품코드"],
+        "help": "상품 1개 = 1행. 같은 상품이라도 채널마다 상품코드가 다르므로, "
+                "코드가 여러 개면 한 칸에 쉼표(,)로 구분해 적으세요.",
     },
 }
 
+CODE_SEP = ", "
+
+
+def split_codes(s):
+    """'2202..., 2800...' → ['2202...', '2800...'] (쉼표/줄바꿈/공백 모두 허용)."""
+    out = []
+    for tok in norm(s).replace("\n", ",").replace(" ", ",").split(","):
+        tok = tok.strip()
+        if tok and tok not in out:
+            out.append(tok)
+    return out
+
+
+def product_groups():
+    """상품마스터를 상품 1개 = 1행으로. [{rep, cat, codes[]}] (한익스상품명 정렬)."""
+    pm = load_master("product.json")
+    groups = {}
+    for code in sorted(pm):
+        rep, cat = product_rep_cat(pm, code)
+        g = groups.setdefault(rep or "", {"rep": rep or "", "cat": cat or DEFAULT_CAT, "codes": []})
+        g["codes"].append(code)
+    return sorted(groups.values(), key=lambda g: g["rep"])
+
 
 def master_rows(kind):
-    """마스터 → 엑셀 행 목록. product는 코드 1개 = 1행(한익스상품명 기준 정렬)."""
-    data = load_master(MASTER_KINDS[kind]["file"])
+    """마스터 → 엑셀 행 목록. 둘 다 '1행 = 1항목'."""
     if kind == "product":
-        rows = []
-        for code in data:
-            rep, cat = product_rep_cat(data, code)
-            rows.append([code, rep or "", cat or DEFAULT_CAT])
-        rows.sort(key=lambda r: (r[1], r[0]))   # 같은 상품의 채널별 코드가 붙어 보이도록
-        return rows
+        return [[g["rep"], g["cat"], CODE_SEP.join(g["codes"])] for g in product_groups()]
+    data = load_master(MASTER_KINDS[kind]["file"])
     return sorted(([k, v] for k, v in data.items()), key=lambda r: (r[1], r[0]))
 
 
@@ -241,18 +259,14 @@ def build_master_xlsx(kind):
     for row in rows:
         ws.append(row)
     last = max(ws.max_row, 2) + 200   # 아래로 추가 입력할 여유 행까지 드롭다운 적용
-    if kind == "center":
-        opts = all_hubs()
-        col = "B"
-    else:
-        opts = PRODUCT_CATS
-        col = "C"
+    opts = all_hubs() if kind == "center" else PRODUCT_CATS
+    col = "B"   # center: 이고센터, product: 구분 — 둘 다 두 번째 열
     if opts:
         dv = DataValidation(type="list", formula1='"%s"' % ",".join(opts), allow_blank=True)
         dv.error = "목록에 있는 값만 입력할 수 있습니다."
         ws.add_data_validation(dv)
         dv.add("%s2:%s%d" % (col, col, last))
-    widths = {"center": [34, 16], "product": [20, 34, 12]}[kind]
+    widths = {"center": [34, 16], "product": [34, 12, 46]}[kind]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     for r in range(2, ws.max_row + 1):
@@ -289,13 +303,19 @@ def parse_master_xlsx(path, kind):
                 errors.append("%d행: 센터명과 이고센터를 모두 채워주세요." % i); continue
             data[name] = hub
         else:
-            code, rep, cat = vals
-            if not code or not rep:
-                errors.append("%d행: 상품코드와 한익스상품명을 모두 채워주세요." % i); continue
+            rep, cat, codes_txt = vals
+            codes = split_codes(codes_txt)
+            if not rep or not codes:
+                errors.append("%d행: 한익스상품명과 상품코드를 모두 채워주세요." % i); continue
             if cat and cat not in PRODUCT_CATS:
                 errors.append("%d행: 구분은 %s 중 하나여야 합니다. (받은 값: %s)"
                               % (i, "/".join(PRODUCT_CATS), cat)); continue
-            data[code] = {"rep": rep, "cat": cat or DEFAULT_CAT}
+            dup = [c for c in codes if c in data]
+            if dup:
+                errors.append("%d행: 상품코드 %s 가 다른 행에도 있습니다. 코드는 상품 하나에만 넣어주세요."
+                              % (i, ", ".join(dup))); continue
+            for code in codes:
+                data[code] = {"rep": rep, "cat": cat or DEFAULT_CAT}
     return data, errors
 
 
