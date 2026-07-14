@@ -57,7 +57,8 @@
   .stat{display:flex;gap:22px;flex-wrap:wrap;margin:6px 0 2px}
   .stat .n{font-size:28px;font-weight:800}
   .stat .l{font-size:13px;color:var(--sub)}
-  .drop{border:2px dashed #cbd5e1;border-radius:14px;padding:34px;text-align:center;background:#f8fafc;
+  /* label은 기본이 inline이라 display를 안 주면 점선 테두리가 줄마다 조각나고 padding이 레이아웃을 못 민다 */
+  .drop{display:block;border:2px dashed #cbd5e1;border-radius:14px;padding:34px;text-align:center;background:#f8fafc;
     cursor:pointer;transition:.15s}
   .drop.drag{border-color:var(--brand);background:#eff6ff}
   .muted{color:var(--sub);font-size:13px}
