@@ -334,9 +334,15 @@ def master_edit(which):
         items = sorted(data.items())
         if q:
             items = [(k, v) for k, v in items if q.lower() in k.lower() or q.lower() in str(v).lower()]
+    # 한 화면에 다 뿌리면 찾기 힘들어서 페이지로 나눈다
+    per, found = 25, len(items)
+    pages = max(1, (found + per - 1) // per)
+    page = min(max(request.args.get("page", 1, type=int), 1), pages)
+    items = items[(page - 1) * per:page * per]
     hubs = sc.all_hubs()
     return render_template("master_edit.html", which=which, d=d, items=items, reps=reps,
-                           q=q, total=len(data), hubs=hubs, product_cats=sc.PRODUCT_CATS)
+                           q=q, total=len(data), found=found, page=page, pages=pages,
+                           hubs=hubs, product_cats=sc.PRODUCT_CATS)
 
 
 @app.route("/masters/<which>/save", methods=["POST"])
@@ -393,6 +399,79 @@ def master_save(which):
             flash("삭제: %s" % k, "ok")
     sc.save_master(d["file"], data)
     return redirect(url_for("master_edit", which=which, q=request.form.get("q", "")))
+
+
+# ---------- 마스터 엑셀 (다운로드 → 엑셀에서 수정 → 업로드) ----------
+MASTER_TMP = os.path.join(ARCHIVE_DIR, "master_upload")
+MASTER_BAK = os.path.join(ARCHIVE_DIR, "master_backup")
+
+
+@app.route("/masters/<which>/xlsx")
+def master_xlsx(which):
+    if which not in sc.MASTER_KINDS:
+        abort(404)
+    bio = sc.build_master_xlsx(which)
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    nm = {"center": "센터마스터", "product": "상품마스터"}[which]
+    return send_file(bio, as_attachment=True, download_name="%s_%s.xlsx" % (nm, today),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/masters/<which>/import", methods=["POST"])
+def master_import(which):
+    """엑셀 업로드 → 무엇이 바뀌는지 먼저 보여준다(아직 반영 안 함)."""
+    if which not in sc.MASTER_KINDS:
+        abort(404)
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("엑셀 파일을 선택해 주세요.", "error")
+        return redirect(url_for("master_edit", which=which))
+    if os.path.splitext(f.filename)[1].lower() not in (".xlsx", ".xlsm"):
+        flash("xlsx 파일만 업로드할 수 있습니다.", "error")
+        return redirect(url_for("master_edit", which=which))
+    os.makedirs(MASTER_TMP, exist_ok=True)
+    token = "%s_%s" % (which, uuid.uuid4().hex[:8])
+    path = os.path.join(MASTER_TMP, token + ".xlsx")
+    f.save(path)
+    try:
+        new, errors = sc.parse_master_xlsx(path, which)
+    except Exception as e:
+        os.remove(path)
+        flash("엑셀을 읽지 못했습니다: %s" % e, "error")
+        return redirect(url_for("master_edit", which=which))
+    if not new and not errors:
+        os.remove(path)
+        flash("내용이 없는 엑셀입니다.", "error")
+        return redirect(url_for("master_edit", which=which))
+    diff = sc.diff_master(which, new)
+    return render_template("master_import.html", which=which, d=MASTER_DEFS[which],
+                           token=token, filename=f.filename, diff=diff,
+                           errors=errors, total=len(new))
+
+
+@app.route("/masters/<which>/import/apply", methods=["POST"])
+def master_import_apply(which):
+    """확인 후 실제 반영. 반영 직전 현재 마스터를 백업한다."""
+    if which not in sc.MASTER_KINDS:
+        abort(404)
+    token = request.form.get("token", "")
+    path = os.path.join(MASTER_TMP, token + ".xlsx")
+    if not token.startswith(which + "_") or not os.path.exists(path):
+        flash("업로드가 만료되었습니다. 엑셀을 다시 올려주세요.", "error")
+        return redirect(url_for("master_edit", which=which))
+    new, errors = sc.parse_master_xlsx(path, which)
+    fname = sc.MASTER_KINDS[which]["file"]
+    # 백업 후 교체
+    os.makedirs(MASTER_BAK, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    with open(os.path.join(MASTER_BAK, "%s.%s.json" % (fname, ts)), "w", encoding="utf-8") as bf:
+        json.dump(sc.load_master(fname), bf, ensure_ascii=False, indent=1, sort_keys=True)
+    diff = sc.diff_master(which, new)
+    sc.save_master(fname, new)
+    os.remove(path)
+    flash("엑셀을 반영했습니다 — 추가 %d · 수정 %d · 삭제 %d (전체 %d개). 이전 마스터는 백업해 두었습니다."
+          % (len(diff["added"]), len(diff["changed"]), len(diff["removed"]), len(new)), "ok")
+    return redirect(url_for("master_edit", which=which))
 
 
 @app.route("/health")

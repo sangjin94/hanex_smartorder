@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · 엑셀 반영 확인{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1>엑셀 반영 확인</h1>
+    <a href="{{ url_for('master_edit', which=which) }}" class="muted">← 취소하고 돌아가기</a>
+  </div>
+  <div class="sub">{{ d.title }} · 파일: <b>{{ filename }}</b> · 엑셀에 담긴 항목 {{ total }}개</div>
+
+  {% if errors %}
+  <div class="warnbox" style="margin-top:14px">
+    <b>⚠ 건너뛴 행 {{ errors|length }}개</b> — 아래 행은 반영되지 않습니다.
+    <ul style="margin:6px 0 0;padding-left:18px">
+      {% for e in errors[:15] %}<li>{{ e }}</li>{% endfor %}
+      {% if errors|length > 15 %}<li class="muted">… 외 {{ errors|length - 15 }}개</li>{% endif %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="stat" style="margin-top:14px">
+    <div><div class="n" style="color:#059669">{{ diff.added|length }}</div><div class="l">추가</div></div>
+    <div><div class="n" style="color:#2563eb">{{ diff.changed|length }}</div><div class="l">수정</div></div>
+    <div><div class="n" style="color:{{ '#dc2626' if diff.removed else '#64748b' }}">{{ diff.removed|length }}</div><div class="l">삭제</div></div>
+  </div>
+
+  {% if diff.removed %}
+  <div class="warnbox" style="margin-top:14px">
+    <b>⚠ 삭제 {{ diff.removed|length }}개</b> — 엑셀에 없는 항목은 마스터에서 <b>지워집니다</b>.
+    일부만 고치려던 거라면, 다운로드한 엑셀에서 행을 지우지 마세요.
+  </div>
+  {% endif %}
+
+  {% macro tbl(title, rows, kind) %}
+    {% if rows %}
+    <h2 style="margin-top:18px">{{ title }} ({{ rows|length }})</h2>
+    <table>
+      <tr>
+        <th style="width:38%">{{ '상품코드' if which=='product' else '센터명' }}</th>
+        {% if kind=='changed' %}<th>현재</th><th>엑셀(반영될 값)</th>{% else %}<th>값</th>{% endif %}
+      </tr>
+      {% for row in rows[:60] %}
+      <tr>
+        <td><code class="k">{{ row[0] }}</code></td>
+        {% if kind=='changed' %}
+          <td class="muted">{{ row[1] }}</td><td><b>{{ row[2] }}</b></td>
+        {% else %}
+          <td>{{ row[1] }}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      {% if rows|length > 60 %}
+      <tr><td colspan="3" class="muted" style="text-align:center">… 외 {{ rows|length - 60 }}개</td></tr>
+      {% endif %}
+    </table>
+    {% endif %}
+  {% endmacro %}
+
+  {{ tbl('추가되는 항목', diff.added, 'added') }}
+  {{ tbl('바뀌는 항목', diff.changed, 'changed') }}
+  {{ tbl('삭제되는 항목', diff.removed, 'removed') }}
+
+  {% if not diff.added and not diff.changed and not diff.removed %}
+  <div class="okbox" style="margin-top:14px"><b>✅ 현재 마스터와 같습니다.</b> 바뀌는 내용이 없습니다.</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('master_import_apply', which=which) }}" class="row" style="margin-top:18px">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button class="btn big ok" type="submit"
+      onclick="return confirm('엑셀 내용으로 마스터를 반영합니다.\n추가 {{ diff.added|length }} · 수정 {{ diff.changed|length }} · 삭제 {{ diff.removed|length }}')">
+      ✅ 이대로 반영하기
+    </button>
+    <a class="btn gray" href="{{ url_for('master_edit', which=which) }}">취소</a>
+    <span class="muted">반영 직전에 현재 마스터를 자동 백업합니다.</span>
+  </form>
+</div>
+{% endblock %}

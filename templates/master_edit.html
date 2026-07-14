@@ -9,21 +9,53 @@
   </div>
   <div class="sub">
     {% if is_prod %}상품 {{ reps|length }}개 · 등록된 채널 코드 {{ total }}개{% else %}전체 {{ total }}개{% endif %}
-    {% if q %} · '<b>{{ q }}</b>' 검색 결과 {{ items|length }}개{% endif %}
+    {% if q %} · '<b>{{ q }}</b>' 검색 결과 {{ found }}개{% endif %}
   </div>
 
-  <!-- 추가 -->
-  <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="margin-top:16px;gap:8px">
+  <!-- 엑셀로 관리 (화면에서 한 줄씩 고치기 번거로울 때) -->
+  <div class="okbox" style="margin-top:14px">
+    <b>📗 엑셀로 관리하기</b> — 엑셀로 받아서 고치고 다시 올리는 게 가장 편합니다.
+    <div class="row" style="gap:8px;margin-top:10px;align-items:center">
+      <a class="btn ok" href="{{ url_for('master_xlsx', which=which) }}">⬇ 엑셀 다운로드</a>
+      <form method="post" action="{{ url_for('master_import', which=which) }}"
+            enctype="multipart/form-data" class="row" style="gap:6px;align-items:center">
+        <input type="file" name="file" accept=".xlsx" required>
+        <button class="btn" type="submit">⬆ 엑셀 업로드</button>
+      </form>
+    </div>
+    <div class="muted" style="margin-top:8px;font-size:13px">
+      올리면 <b>무엇이 추가·수정·삭제되는지 먼저 보여드리고</b>, 확인 후에 반영합니다 (반영 직전 자동 백업).
+      엑셀에서 지운 행은 마스터에서도 삭제되니, 일부만 고칠 땐 행을 지우지 마세요.
+    </div>
+  </div>
+
+  <!-- 한 건 추가 -->
+  <h2 style="margin-top:20px;font-size:15px">한 건 추가</h2>
+  <form method="post" action="{{ url_for('master_save', which=which) }}" class="row" style="margin-top:8px;gap:10px;align-items:flex-end">
     <input type="hidden" name="action" value="add">
-    <input type="text" name="key" placeholder="{{ '상품코드 (채널별)' if is_prod else '센터명' }}" style="max-width:240px" required>
-    <span style="color:var(--sub)">→</span>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span class="muted" style="font-size:12px">{{ '상품코드 (RAW에 찍힌 코드)' if is_prod else '센터명 (RAW에 찍힌 이름 그대로)' }}</span>
+      <input type="text" name="key" placeholder="{{ '예: 2202000073314' if is_prod else '예: BGF로지스강화' }}" style="width:240px" required>
+    </label>
     {% if is_prod %}
-      <input list="replist" type="text" name="value" placeholder="한익스상품명 (기존 상품 선택 가능)" style="max-width:300px" required>
-      <select name="cat" style="max-width:130px">
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span class="muted" style="font-size:12px">한익스상품명 (표지에 찍히는 이름)</span>
+      <input list="replist" type="text" name="value" placeholder="기존 상품이면 목록에서 선택" style="width:300px" required>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span class="muted" style="font-size:12px">구분 (라벨 제목)</span>
+      <select name="cat" style="width:140px">
         {% for c in product_cats %}<option value="{{ c }}">{{ c }}직매장</option>{% endfor %}
       </select>
+    </label>
     {% else %}
-      <input list="hublist" type="text" name="value" placeholder="이고센터" style="max-width:240px" required>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span class="muted" style="font-size:12px">이고센터 (라벨·표지에 찍히는 한익스 거점)</span>
+      <select name="value" style="width:220px" required>
+        <option value="">선택하세요</option>
+        {% for h in hubs %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </label>
     {% endif %}
     <button class="btn ok" type="submit">추가</button>
   </form>
@@ -35,8 +67,9 @@
   {% endif %}
 
   <!-- 검색 -->
-  <form method="get" class="row" style="margin-top:10px;gap:8px">
-    <input type="text" name="q" value="{{ q }}" placeholder="{{ '상품코드/상품명 검색' if is_prod else '센터명/이고센터 검색' }}" style="max-width:280px">
+  <h2 style="margin-top:22px;font-size:15px">찾기 · 고치기</h2>
+  <form method="get" class="row" style="margin-top:8px;gap:8px">
+    <input type="text" name="q" value="{{ q }}" placeholder="{{ '상품코드/한익스상품명으로 검색' if is_prod else '센터명/이고센터로 검색' }}" style="max-width:300px">
     <button class="btn gray" type="submit">검색</button>
     {% if q %}<a class="muted" href="{{ url_for('master_edit', which=which) }}">전체보기</a>{% endif %}
   </form>
@@ -106,7 +139,10 @@
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="key" value="{{ k }}">
             <input type="hidden" name="q" value="{{ q }}">
-            <input list="hublist" type="text" name="value" value="{{ v }}" style="max-width:260px">
+            <select name="value" style="max-width:220px">
+              {% for h in hubs %}<option value="{{ h }}" {{ 'selected' if h==v }}>{{ h }}</option>{% endfor %}
+              {% if v not in hubs %}<option value="{{ v }}" selected>{{ v }}</option>{% endif %}
+            </select>
             <button class="btn gray" type="submit" style="padding:7px 12px">저장</button>
           </form>
         </td>
@@ -123,9 +159,24 @@
     {% endif %}
 
     {% if not items %}
-    <tr><td colspan="3" class="muted" style="text-align:center;padding:24px">항목이 없습니다.</td></tr>
+    <tr><td colspan="3" class="muted" style="text-align:center;padding:24px">
+      {% if q %}'{{ q }}' 검색 결과가 없습니다.{% else %}항목이 없습니다.{% endif %}
+    </td></tr>
     {% endif %}
   </table>
+
+  {% if pages > 1 %}
+  <div class="row" style="margin-top:12px;gap:6px;align-items:center;flex-wrap:wrap">
+    {% if page > 1 %}
+    <a class="btn gray" style="padding:6px 12px" href="{{ url_for('master_edit', which=which, q=q, page=page-1) }}">← 이전</a>
+    {% endif %}
+    <span class="muted">{{ page }} / {{ pages }} 페이지 · 전체 {{ found }}개</span>
+    {% if page < pages %}
+    <a class="btn gray" style="padding:6px 12px" href="{{ url_for('master_edit', which=which, q=q, page=page+1) }}">다음 →</a>
+    {% endif %}
+    <span class="muted" style="margin-left:8px">많이 고칠 땐 위의 <b>엑셀 다운로드</b>가 빠릅니다.</span>
+  </div>
+  {% endif %}
 </div>
 <datalist id="hublist">{% for h in hubs %}<option value="{{ h }}">{% endfor %}</datalist>
 <datalist id="replist">{% for r in reps %}<option value="{{ r }}">{% endfor %}</datalist>

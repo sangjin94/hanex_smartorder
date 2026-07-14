@@ -194,6 +194,134 @@ def all_reps():
     return dict(sorted(reps.items()))
 
 # ----------------------------------------------------------------------------
+# 마스터 ↔ 엑셀 (다운로드 · 수정 · 업로드)
+# ----------------------------------------------------------------------------
+MASTER_KINDS = {
+    "center": {
+        "file": CENTER_MASTER,
+        "headers": ["센터명", "이고센터"],
+        "help": "센터명은 RAW에 찍히는 이름 그대로. 이고센터는 드롭다운에서 선택하세요.",
+    },
+    "product": {
+        "file": "product.json",
+        "headers": ["상품코드", "한익스상품명", "구분"],
+        "help": "같은 상품이라도 채널마다 상품코드가 다릅니다. 코드 1개 = 1행이며, "
+                "같은 상품이면 한익스상품명을 똑같이 적으세요(다르면 표지에서 다른 상품으로 집계).",
+    },
+}
+
+
+def master_rows(kind):
+    """마스터 → 엑셀 행 목록. product는 코드 1개 = 1행(한익스상품명 기준 정렬)."""
+    data = load_master(MASTER_KINDS[kind]["file"])
+    if kind == "product":
+        rows = []
+        for code in data:
+            rep, cat = product_rep_cat(data, code)
+            rows.append([code, rep or "", cat or DEFAULT_CAT])
+        rows.sort(key=lambda r: (r[1], r[0]))   # 같은 상품의 채널별 코드가 붙어 보이도록
+        return rows
+    return sorted(([k, v] for k, v in data.items()), key=lambda r: (r[1], r[0]))
+
+
+def build_master_xlsx(kind):
+    """마스터 엑셀 다운로드. 이고센터/구분은 엑셀 드롭다운(목록 검증)으로 넣어 오타를 막는다."""
+    from openpyxl.worksheet.datavalidation import DataValidation
+    spec = MASTER_KINDS[kind]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = {"center": "센터마스터", "product": "상품마스터"}[kind]
+    ws.append(spec["headers"])
+    for c in range(1, len(spec["headers"]) + 1):
+        cell = ws.cell(1, c)
+        cell.font = Font(name=FONT, size=11, bold=True)
+        cell.fill = HDR_FILL
+        cell.alignment = AL_C
+    rows = master_rows(kind)
+    for row in rows:
+        ws.append(row)
+    last = max(ws.max_row, 2) + 200   # 아래로 추가 입력할 여유 행까지 드롭다운 적용
+    if kind == "center":
+        opts = all_hubs()
+        col = "B"
+    else:
+        opts = PRODUCT_CATS
+        col = "C"
+    if opts:
+        dv = DataValidation(type="list", formula1='"%s"' % ",".join(opts), allow_blank=True)
+        dv.error = "목록에 있는 값만 입력할 수 있습니다."
+        ws.add_data_validation(dv)
+        dv.add("%s2:%s%d" % (col, col, last))
+    widths = {"center": [34, 16], "product": [20, 34, 12]}[kind]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for r in range(2, ws.max_row + 1):
+        for c in range(1, len(spec["headers"]) + 1):
+            ws.cell(r, c).font = Font(name=FONT, size=11)
+    ws.freeze_panes = "A2"
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return bio
+
+
+def parse_master_xlsx(path, kind):
+    """업로드된 마스터 엑셀 → 마스터 dict. (오류 행은 사유와 함께 함께 반환)"""
+    spec = MASTER_KINDS[kind]
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb.active
+    grid = [list(r) for r in ws.iter_rows(values_only=True)]
+    if not grid:
+        raise ValueError("빈 파일입니다.")
+    hdr = [norm(x) for x in grid[0]]
+    need = spec["headers"]
+    if hdr[:len(need)] != need:
+        raise ValueError("첫 행 머리글이 달라요. '%s' 여야 합니다. (받은 값: %s)"
+                         % (" / ".join(need), " / ".join(h for h in hdr[:len(need)] if h) or "빈 행"))
+    data, errors = {}, []
+    for i, r in enumerate(grid[1:], start=2):
+        vals = [norm(r[c]) if c < len(r) else "" for c in range(len(need))]
+        if not any(vals):
+            continue
+        if kind == "center":
+            name, hub = vals
+            if not name or not hub:
+                errors.append("%d행: 센터명과 이고센터를 모두 채워주세요." % i); continue
+            data[name] = hub
+        else:
+            code, rep, cat = vals
+            if not code or not rep:
+                errors.append("%d행: 상품코드와 한익스상품명을 모두 채워주세요." % i); continue
+            if cat and cat not in PRODUCT_CATS:
+                errors.append("%d행: 구분은 %s 중 하나여야 합니다. (받은 값: %s)"
+                              % (i, "/".join(PRODUCT_CATS), cat)); continue
+            data[code] = {"rep": rep, "cat": cat or DEFAULT_CAT}
+    return data, errors
+
+
+def _master_val(kind, data, key):
+    if kind == "product":
+        rep, cat = product_rep_cat(data, key)
+        return "%s (%s)" % (rep or "", cat or DEFAULT_CAT)
+    return data.get(key, "")
+
+
+def diff_master(kind, new):
+    """현재 마스터 vs 업로드본 → 추가/수정/삭제 목록(적용 전 확인용)."""
+    cur = load_master(MASTER_KINDS[kind]["file"])
+    added, changed, removed = [], [], []
+    for k in new:
+        if k not in cur:
+            added.append((k, _master_val(kind, new, k)))
+        elif _master_val(kind, cur, k) != _master_val(kind, new, k):
+            changed.append((k, _master_val(kind, cur, k), _master_val(kind, new, k)))
+    for k in cur:
+        if k not in new:
+            removed.append((k, _master_val(kind, cur, k)))
+    return {"added": sorted(added), "changed": sorted(changed), "removed": sorted(removed)}
+
+
+# ----------------------------------------------------------------------------
 # RAW 파싱
 # ----------------------------------------------------------------------------
 def _read_any(path):

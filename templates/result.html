@@ -53,7 +53,10 @@
         <td><code class="k">{{ nm }}</code></td>
         <td class="muted">{{ code or '—' }}</td>
         <td>
-          <input list="hublist" type="text" name="center::{{ nm }}" placeholder="예: 이천센터">
+          <select name="center::{{ nm }}">
+            <option value="">이고센터를 고르세요</option>
+            {% for h in hubs %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+          </select>
         </td>
       </tr>
       {% endfor %}
