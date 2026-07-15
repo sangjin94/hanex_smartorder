@@ -16,7 +16,7 @@ echo "[3/7] venv + 의존성"
 cd "$APPDIR"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
-./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install -r requirements.txt gunicorn   # gunicorn은 서버 배포 전용(로컬 requirements에는 없음)
 
 echo "[4/7] 마스터 영구 디렉터리(git 밖) + 시드 · 업로드 아카이브"
 mkdir -p "$DATADIR" /home/ubuntu/hanex_smartorder_data/archive

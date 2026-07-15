@@ -603,6 +603,7 @@ def health():
 if __name__ == "__main__":
     import webbrowser, threading
     port = int(os.environ.get("PORT", 5057))
+    host = os.environ.get("HOST", "127.0.0.1")   # 로컬 전용(방화벽 팝업 방지). 서버 배포 시 HOST=0.0.0.0
     if os.environ.get("NO_BROWSER") != "1":
         threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:%d/" % port)).start()
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host=host, port=port, debug=False)
