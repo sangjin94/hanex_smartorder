@@ -1,70 +1,68 @@
 {% extends "base.html" %}
-{% block title %}작업 집계{% endblock %}
+{% block title %}작업 집계(검수리스트){% endblock %}
 {% block body %}
+{% set qtylabel = '발주단위수량' if ch=='cu' else '수량' %}
 <div class="card">
   <div class="row" style="justify-content:space-between">
-    <h1>작업 집계</h1>
-    <div class="muted">업로드한 모든 파일을 <b>일자 · 한익스상품명</b> 기준으로 집계합니다.</div>
+    <h1>{{ cfg[ch].name }} 스마트오더 검수리스트</h1>
+    <div class="muted">배송센터 · 센터명 · 상품명 별 {{ qtylabel }} 집계</div>
   </div>
 
-  <!-- 보기 기준 + 일자 필터 -->
+  <!-- 채널 선택 -->
   <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
-    <span class="muted" style="align-self:center">보기</span>
-    <a class="btn {{ '' if view=='channel' else 'gray' }}" href="{{ url_for('report', view='channel', date=sel_date) }}">채널별</a>
-    <a class="btn {{ '' if view=='hub' else 'gray' }}" href="{{ url_for('report', view='hub', date=sel_date) }}">거점센터별</a>
-    <span style="width:16px"></span>
-    <span class="muted" style="align-self:center">일자</span>
-    <a class="btn {{ 'gray' if sel_date }}" href="{{ url_for('report', view=view) }}">전체</a>
-    {% for d in dates %}
-    <a class="btn {{ '' if sel_date==d else 'gray' }}" href="{{ url_for('report', view=view, date=d) }}">{{ d }}</a>
+    <span class="muted" style="align-self:center">채널</span>
+    {% for c in channels %}
+    <a class="btn {{ '' if ch==c else 'gray' }}" href="{{ url_for('report', ch=c) }}">{{ cfg[c].name }}</a>
     {% endfor %}
     <span class="sp" style="margin-left:auto"></span>
     <button class="btn gray" type="button" onclick="copyReport()">📑 복사</button>
-    <a class="btn ok" href="{{ url_for('report_xlsx', view=view, date=sel_date) }}">⬇ 엑셀</a>
+    <a class="btn ok" href="{{ url_for('report_xlsx', ch=ch, date=sel_date) }}">⬇ 엑셀</a>
   </div>
 
-  {% if skipped %}
-  <div class="warnbox" style="margin-top:12px">
-    한익스상품명이 아직 없는 상품 <b>{{ skipped }}</b>개는 집계에서 제외됐습니다.
-    <a href="{{ url_for('master_edit', which='product') }}">상품마스터</a>에서 등록하면 포함됩니다.
+  <!-- 일자 선택 -->
+  <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+    <span class="muted" style="align-self:center">일자</span>
+    <a class="btn {{ 'gray' if sel_date }}" href="{{ url_for('report', ch=ch) }}">전체</a>
+    {% for d in dates %}
+    <a class="btn {{ '' if sel_date==d else 'gray' }}" href="{{ url_for('report', ch=ch, date=d) }}">{{ d }}</a>
+    {% endfor %}
+    {% if not dates %}<span class="muted" style="align-self:center">업로드된 {{ cfg[ch].name }} 데이터가 없습니다.</span>{% endif %}
   </div>
-  {% endif %}
 
   <div style="overflow-x:auto;margin-top:16px">
-  <table id="reportTable">
+  <table id="reportTable" class="chk">
     <tr>
-      <th style="width:150px">한익스상품명</th>
-      <th style="width:64px">구분</th>
-      {% for key,name in columns %}<th style="text-align:right">{{ name }}</th>{% endfor %}
-      <th style="text-align:right;width:70px">합계</th>
+      <th style="width:22%">배송센터</th>
+      <th style="width:24%">센터명</th>
+      <th>상품명</th>
+      <th style="width:130px;text-align:right">합계 : {{ qtylabel }}</th>
     </tr>
-    {% for g in groups %}
-    <tr style="background:#eef2ff"><td colspan="{{ columns|length + 3 }}"><b>📅 {{ g.date }}</b></td></tr>
-    {% for r in g.rows %}
-    <tr>
-      <td>{{ r.rep }}</td>
-      <td><span class="pill {{ 'cu' if r.cat=='대월' else 'e24' }}">{{ r.cat }}</span></td>
-      {% for key,name in columns %}
-      <td style="text-align:right">{{ r.cols[key] or '' }}</td>
+    {% for b in blocks %}
+      {% for cb in b.centers %}
+        {% for prod,q in cb.prods %}
+        <tr>
+          <td>{{ b.hub if loop.first and cb == b.centers[0] else '' }}</td>
+          <td>{{ cb.center if loop.first else '' }}</td>
+          <td>{{ prod }}</td>
+          <td style="text-align:right">{{ q }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="sub">
+          <td></td>
+          <td><b>{{ cb.center }} 요약</b></td>
+          <td></td>
+          <td style="text-align:right"><b>{{ cb.sub }}</b></td>
+        </tr>
       {% endfor %}
-      <td style="text-align:right"><b>{{ r.total }}</b></td>
-    </tr>
     {% endfor %}
-    <tr style="background:#f8fafc;font-weight:700">
-      <td colspan="2">{{ g.date }} 소계</td>
-      {% for key,name in columns %}<td style="text-align:right">{{ g.sub[key] or '' }}</td>{% endfor %}
-      <td style="text-align:right">{{ g.sub_total }}</td>
-    </tr>
-    {% endfor %}
-    {% if groups %}
-    <tr style="background:#dbe9f7;font-weight:800">
-      <td colspan="2">총합계</td>
-      {% for key,name in columns %}<td style="text-align:right">{{ grand[key] or '' }}</td>{% endfor %}
-      <td style="text-align:right">{{ grand_total }}</td>
+    {% if blocks %}
+    <tr class="grand">
+      <td colspan="3"><b>총합계</b></td>
+      <td style="text-align:right"><b>{{ grand }}</b></td>
     </tr>
     {% else %}
-    <tr><td colspan="{{ columns|length + 3 }}" class="muted" style="text-align:center;padding:26px">
-      집계할 데이터가 없습니다. 먼저 RAW 파일을 업로드하세요.
+    <tr><td colspan="4" class="muted" style="text-align:center;padding:26px">
+      집계할 데이터가 없습니다. {{ cfg[ch].name }} RAW 파일을 먼저 업로드하세요.
     </td></tr>
     {% endif %}
   </table>
@@ -72,6 +70,11 @@
   <div class="muted" id="copymsg" style="margin-top:10px;display:none;color:#059669">복사했습니다. 엑셀/메신저에 붙여넣기 하세요.</div>
 </div>
 
+<style>
+  table.chk td, table.chk th{border:1px solid #cbd5e1}
+  table.chk tr.sub td{background:#fffbcc;font-weight:700}
+  table.chk tr.grand td{background:#dbe9f7;font-weight:800}
+</style>
 <script>
 function copyReport(){
   const t=document.getElementById('reportTable');

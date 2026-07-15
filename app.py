@@ -312,7 +312,7 @@ def history_delete(uid):
     return redirect(url_for("history", ch=request.form.get("ch", "")))
 
 
-# ---------------- 작업 집계 (일자 · 한익스상품명 · 채널/거점센터) ----------------
+# ---------------- 작업 집계(검수리스트): 채널·일자별 · 이고센터>센터>상품(화주)>수량 ----------------
 def _norm_date(s):
     """'20260715' / '2026-07-14 00:00:00' / '2026-07-14' → '2026-07-15'. 없으면 ''"""
     s = (s or "").strip()
@@ -324,13 +324,19 @@ def _norm_date(s):
     return s
 
 
-def _aggregate():
-    """아카이브 전체를 가로질러 (일자, 한익스상품명, 구분) 별 채널·거점센터 수량 집계.
-    반환: agg{key: {'ch':{ch:qty}, 'hub':{hub:qty}}}, dates[], hubs[], skipped(한익스상품명 없는 수량)
-    """
-    agg, dates, hubs, skipped = {}, set(), set(), 0
+def _hubkey(h):
+    return (1, "") if h in ("(미지정)", "") else (0, h)
+
+
+def _checklist(ch, sel_date):
+    """한 채널의 업로드들을 (이고센터 > 채널센터 > 화주상품명) 별 수량으로 집계.
+    수량은 process()의 row['수량'](CU=발주단위수량). 반환: (blocks, grand, dates)"""
+    agg = {}          # (hub, center, prod) -> qty
+    dates = set()
     for rec in _load_index():
-        ch, path = rec["ch"], _rec_path(rec)
+        if rec["ch"] != ch:
+            continue
+        path = _rec_path(rec)
         if not os.path.exists(path):
             continue
         try:
@@ -338,91 +344,88 @@ def _aggregate():
         except Exception:
             continue
         for row in rows:
-            q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
-            rep = row["대표"]
             d = _norm_date(row["배송일자"]) or "(일자없음)"
-            if not rep:
-                skipped += q
+            dates.add(d)
+            if sel_date and d != sel_date:
                 continue
-            hub = row["거점센터"] or "(거점미지정)"
-            dates.add(d); hubs.add(hub)
-            e = agg.setdefault((d, rep, row["구분"]), {"ch": {}, "hub": {}})
-            e["ch"][ch] = e["ch"].get(ch, 0) + q
-            e["hub"][hub] = e["hub"].get(hub, 0) + q
-    return agg, sorted(dates, reverse=True), sorted(hubs), skipped
+            q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
+            key = (row["거점센터"] or "(미지정)", row["센터"] or "", row["상품명"] or "")
+            agg[key] = agg.get(key, 0) + q
 
+    # 트리: hub -> center -> [(prod, qty)]
+    from collections import OrderedDict
+    tree = OrderedDict()
+    for (hub, center, prod) in sorted(agg, key=lambda k: (_hubkey(k[0]), k[1], k[2])):
+        tree.setdefault(hub, OrderedDict()).setdefault(center, []).append((prod, agg[(hub, center, prod)]))
 
-def _report_table(view, sel_date):
-    """집계를 화면/엑셀용 (columns, groups, grand) 로 정리."""
-    agg, dates, hubs, skipped = _aggregate()
-    if view == "hub":
-        columns = [(h, h) for h in hubs]
-    else:
-        columns = [(c, sc.CHANNELS[c]["name"]) for c in CH_ORDER]
-    colkeys = [c for c, _ in columns]
-    # 일자별 그룹
-    groups = {}
-    for (d, rep, cat), e in agg.items():
-        if sel_date and d != sel_date:
-            continue
-        src = e["hub"] if view == "hub" else e["ch"]
-        row = {"rep": rep, "cat": cat,
-               "cols": {k: src.get(k, 0) for k in colkeys},
-               "total": sum(src.values())}
-        groups.setdefault(d, []).append(row)
-    out = []
-    grand = {k: 0 for k in colkeys}; grand_total = 0
-    for d in sorted(groups, reverse=True):
-        rows = sorted(groups[d], key=lambda r: (sc.PRODUCT_CATS.index(r["cat"]) if r["cat"] in sc.PRODUCT_CATS else 9, r["rep"]))
-        sub = {k: sum(r["cols"][k] for r in rows) for k in colkeys}
-        sub_total = sum(r["total"] for r in rows)
-        for k in colkeys:
-            grand[k] += sub[k]
-        grand_total += sub_total
-        out.append({"date": d, "rows": rows, "sub": sub, "sub_total": sub_total})
-    return columns, out, grand, grand_total, dates, skipped
+    blocks, grand = [], 0
+    for hub, centers in tree.items():
+        cblocks, hub_total = [], 0
+        for center, prods in centers.items():
+            sub = sum(q for _, q in prods)
+            hub_total += sub
+            cblocks.append({"center": center, "prods": prods, "sub": sub})
+        grand += hub_total
+        blocks.append({"hub": hub, "centers": cblocks, "hub_total": hub_total})
+    return blocks, grand, sorted(dates, reverse=True)
 
 
 @app.route("/report")
 def report():
-    view = "hub" if request.args.get("view") == "hub" else "channel"
+    ch = request.args.get("ch", "")
+    if ch not in sc.CHANNELS:
+        ch = CH_ORDER[0]
     sel_date = request.args.get("date", "")
-    columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
-    return render_template("report.html", view=view, sel_date=sel_date,
-                           columns=columns, groups=groups, grand=grand,
-                           grand_total=grand_total, dates=dates, skipped=skipped)
+    blocks, grand, dates = _checklist(ch, sel_date)
+    return render_template("report.html", ch=ch, cfg=sc.CHANNELS, channels=CH_ORDER,
+                           sel_date=sel_date, blocks=blocks, grand=grand, dates=dates)
 
 
 @app.route("/report/xlsx")
 def report_xlsx():
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment
-    view = "hub" if request.args.get("view") == "hub" else "channel"
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    ch = request.args.get("ch", "")
+    if ch not in sc.CHANNELS:
+        ch = CH_ORDER[0]
     sel_date = request.args.get("date", "")
-    columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "작업집계"
-    headers = ["일자", "한익스상품명", "구분"] + [name for _, name in columns] + ["합계"]
-    ws.append(headers)
-    hdr_fill = PatternFill("solid", fgColor="FFFFFF00")
-    for c in range(1, len(headers) + 1):
-        ws.cell(1, c).font = Font(name="맑은 고딕", size=11, bold=True)
-        ws.cell(1, c).fill = hdr_fill
-        ws.cell(1, c).alignment = Alignment(horizontal="center")
-    for g in groups:
-        for r in g["rows"]:
-            ws.append([g["date"], r["rep"], r["cat"]] +
-                      [r["cols"][k] for k, _ in columns] + [r["total"]])
-        ws.append(["%s 소계" % g["date"], "", ""] +
-                  [g["sub"][k] for k, _ in columns] + [g["sub_total"]])
-    ws.append(["총합계", "", ""] + [grand[k] for k, _ in columns] + [grand_total])
-    for i, w in enumerate([12, 34, 8] + [11] * len(columns) + [10], 1):
+    blocks, grand, dates = _checklist(ch, sel_date)
+    cfg = sc.CHANNELS[ch]
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "검수리스트"
+    yellow = PatternFill("solid", fgColor="FFFFFF00")
+    thin = Side(style="thin", color="FFBFBFBF")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    qtylabel = "발주단위수량" if ch == "cu" else "수량"
+    ws.append(["배송센터", "센터명", "상품명", "합계 : %s" % qtylabel])
+    for c in range(1, 5):
+        cell = ws.cell(1, c); cell.font = Font(name="맑은 고딕", size=11, bold=True)
+        cell.fill = PatternFill("solid", fgColor="FFDDEBF7"); cell.border = border
+    def put(r, vals, bold=False, fill=None):
+        for c, v in enumerate(vals, 1):
+            cell = ws.cell(r, c, v)
+            cell.font = Font(name="맑은 고딕", size=10, bold=bold)
+            cell.border = border
+            if fill:
+                cell.fill = fill
+    r = 2
+    for b in blocks:
+        first_hub = True
+        for cb in b["centers"]:
+            first_center = True
+            for prod, q in cb["prods"]:
+                put(r, [b["hub"] if first_hub else "", cb["center"] if first_center else "", prod, q])
+                first_hub = first_center = False
+                r += 1
+            put(r, ["", "%s 요약" % cb["center"], "", cb["sub"]], bold=True, fill=yellow)
+            r += 1
+    put(r, ["총합계", "", "", grand], bold=True, fill=yellow)
+    for i, w in enumerate([20, 22, 30, 16], 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
     bio = io.BytesIO(); wb.save(bio); bio.seek(0)
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    tag = "거점센터별" if view == "hub" else "채널별"
+    dtag = sel_date or "전체"
     return send_file(bio, as_attachment=True,
-                     download_name="작업집계_%s_%s.xlsx" % (tag, today),
+                     download_name="%s_검수리스트_%s.xlsx" % (cfg["name"], dtag),
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
