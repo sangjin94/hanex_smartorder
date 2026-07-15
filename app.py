@@ -6,12 +6,27 @@
  - 업로드 중 미매핑 센터/상품 코드를 화면에서 즉시 마스터에 등록
  - 마스터 관리(센터명→이고센터[전 채널 공통], 상품코드→한익스상품명) 조회/추가/수정/삭제
 """
-import os, io, json, re, uuid, datetime
+import os, io, json, re, uuid, datetime, sys
+
+# --- 단일 실행파일(.exe, PyInstaller) 지원 ---------------------------------
+# 리소스(templates/static/masters seed)는 번들에서 읽고,
+# 사용자 데이터(마스터 수정본·업로드 아카이브)는 exe 옆 data/ 폴더에 저장(영구·폴더복사 가능).
+if getattr(sys, "frozen", False):
+    _BUNDLE = sys._MEIPASS
+    _APPDIR = os.path.dirname(sys.executable)
+    os.environ.setdefault("SMARTORDER_SEED", os.path.join(_BUNDLE, "masters"))
+    os.environ.setdefault("SMARTORDER_MASTERS", os.path.join(_APPDIR, "data", "masters"))
+    os.environ.setdefault("SMARTORDER_ARCHIVE", os.path.join(_APPDIR, "data", "archive"))
+    _TPL = os.path.join(_BUNDLE, "templates")
+    _STATIC = os.path.join(_BUNDLE, "static")
+else:
+    _TPL, _STATIC = "templates", "static"
+
 from flask import (Flask, request, render_template, send_file, redirect,
                    url_for, flash, jsonify, abort)
 import smartorder_core as sc
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=_TPL, static_folder=_STATIC)
 app.secret_key = "hanex-smartorder-label-2026"
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40MB
 

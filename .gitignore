@@ -15,6 +15,11 @@ uploads/
 # 업로드 누적 아카이브(로컬 데이터, 커밋 제외)
 archive/
 
+# PyInstaller(exe) 빌드 산출물 — 저장소엔 소스만 (exe는 로컬 빌드/배포)
+build/
+dist/
+*.spec
+
 # 참고 원본(엑셀) — 저장소에 올리지 않음
 ref/
 

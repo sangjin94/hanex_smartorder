@@ -13,9 +13,10 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, Color
 from openpyxl.utils import get_column_letter
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-# 마스터 저장 경로: 배포 시 git 트리 밖(영구 디렉터리)으로 분리해 update(git pull)에도 보존.
+# 마스터 저장 경로: 배포/exe 시 쓰기 가능한 폴더로 분리(SMARTORDER_MASTERS), 없으면 앱 폴더 masters/.
 MASTER_DIR = os.environ.get("SMARTORDER_MASTERS") or os.path.join(BASE, "masters")
-SEED_DIR = os.path.join(BASE, "masters")
+# seed(동봉 기본 마스터) 위치: exe에서는 번들 경로(SMARTORDER_SEED)로 지정.
+SEED_DIR = os.environ.get("SMARTORDER_SEED") or os.path.join(BASE, "masters")
 
 def ensure_masters_seeded():
     """MASTER_DIR가 비어 있으면 코드 동봉 seed(masters/)를 복사한다(최초 배포용)."""
