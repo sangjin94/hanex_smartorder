@@ -297,6 +297,120 @@ def history_delete(uid):
     return redirect(url_for("history", ch=request.form.get("ch", "")))
 
 
+# ---------------- 작업 집계 (일자 · 한익스상품명 · 채널/거점센터) ----------------
+def _norm_date(s):
+    """'20260715' / '2026-07-14 00:00:00' / '2026-07-14' → '2026-07-15'. 없으면 ''"""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    digits = re.sub(r"[^0-9]", "", s.split(" ")[0])
+    if len(digits) >= 8:
+        return "%s-%s-%s" % (digits[0:4], digits[4:6], digits[6:8])
+    return s
+
+
+def _aggregate():
+    """아카이브 전체를 가로질러 (일자, 한익스상품명, 구분) 별 채널·거점센터 수량 집계.
+    반환: agg{key: {'ch':{ch:qty}, 'hub':{hub:qty}}}, dates[], hubs[], skipped(한익스상품명 없는 수량)
+    """
+    agg, dates, hubs, skipped = {}, set(), set(), 0
+    for rec in _load_index():
+        ch, path = rec["ch"], _rec_path(rec)
+        if not os.path.exists(path):
+            continue
+        try:
+            rows, _, _ = sc.process(sc.parse_raw(path, ch), ch)
+        except Exception:
+            continue
+        for row in rows:
+            q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
+            rep = row["대표"]
+            d = _norm_date(row["배송일자"]) or "(일자없음)"
+            if not rep:
+                skipped += q
+                continue
+            hub = row["거점센터"] or "(거점미지정)"
+            dates.add(d); hubs.add(hub)
+            e = agg.setdefault((d, rep, row["구분"]), {"ch": {}, "hub": {}})
+            e["ch"][ch] = e["ch"].get(ch, 0) + q
+            e["hub"][hub] = e["hub"].get(hub, 0) + q
+    return agg, sorted(dates, reverse=True), sorted(hubs), skipped
+
+
+def _report_table(view, sel_date):
+    """집계를 화면/엑셀용 (columns, groups, grand) 로 정리."""
+    agg, dates, hubs, skipped = _aggregate()
+    if view == "hub":
+        columns = [(h, h) for h in hubs]
+    else:
+        columns = [(c, sc.CHANNELS[c]["name"]) for c in CH_ORDER]
+    colkeys = [c for c, _ in columns]
+    # 일자별 그룹
+    groups = {}
+    for (d, rep, cat), e in agg.items():
+        if sel_date and d != sel_date:
+            continue
+        src = e["hub"] if view == "hub" else e["ch"]
+        row = {"rep": rep, "cat": cat,
+               "cols": {k: src.get(k, 0) for k in colkeys},
+               "total": sum(src.values())}
+        groups.setdefault(d, []).append(row)
+    out = []
+    grand = {k: 0 for k in colkeys}; grand_total = 0
+    for d in sorted(groups, reverse=True):
+        rows = sorted(groups[d], key=lambda r: (sc.PRODUCT_CATS.index(r["cat"]) if r["cat"] in sc.PRODUCT_CATS else 9, r["rep"]))
+        sub = {k: sum(r["cols"][k] for r in rows) for k in colkeys}
+        sub_total = sum(r["total"] for r in rows)
+        for k in colkeys:
+            grand[k] += sub[k]
+        grand_total += sub_total
+        out.append({"date": d, "rows": rows, "sub": sub, "sub_total": sub_total})
+    return columns, out, grand, grand_total, dates, skipped
+
+
+@app.route("/report")
+def report():
+    view = "hub" if request.args.get("view") == "hub" else "channel"
+    sel_date = request.args.get("date", "")
+    columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
+    return render_template("report.html", view=view, sel_date=sel_date,
+                           columns=columns, groups=groups, grand=grand,
+                           grand_total=grand_total, dates=dates, skipped=skipped)
+
+
+@app.route("/report/xlsx")
+def report_xlsx():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    view = "hub" if request.args.get("view") == "hub" else "channel"
+    sel_date = request.args.get("date", "")
+    columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "작업집계"
+    headers = ["일자", "한익스상품명", "구분"] + [name for _, name in columns] + ["합계"]
+    ws.append(headers)
+    hdr_fill = PatternFill("solid", fgColor="FFFFFF00")
+    for c in range(1, len(headers) + 1):
+        ws.cell(1, c).font = Font(name="맑은 고딕", size=11, bold=True)
+        ws.cell(1, c).fill = hdr_fill
+        ws.cell(1, c).alignment = Alignment(horizontal="center")
+    for g in groups:
+        for r in g["rows"]:
+            ws.append([g["date"], r["rep"], r["cat"]] +
+                      [r["cols"][k] for k, _ in columns] + [r["total"]])
+        ws.append(["%s 소계" % g["date"], "", ""] +
+                  [g["sub"][k] for k, _ in columns] + [g["sub_total"]])
+    ws.append(["총합계", "", ""] + [grand[k] for k, _ in columns] + [grand_total])
+    for i, w in enumerate([12, 34, 8] + [11] * len(columns) + [10], 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    bio = io.BytesIO(); wb.save(bio); bio.seek(0)
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    tag = "거점센터별" if view == "hub" else "채널별"
+    return send_file(bio, as_attachment=True,
+                     download_name="작업집계_%s_%s.xlsx" % (tag, today),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 # ---------------- 마스터 관리 ----------------
 MASTER_DEFS = {
     "center":  {"file": sc.CENTER_MASTER, "title": "센터 (센터명→이고센터) · 전 채널 공통", "kind": "center"},

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}작업 집계{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1>작업 집계</h1>
+    <div class="muted">업로드한 모든 파일을 <b>일자 · 한익스상품명</b> 기준으로 집계합니다.</div>
+  </div>
+
+  <!-- 보기 기준 + 일자 필터 -->
+  <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+    <span class="muted" style="align-self:center">보기</span>
+    <a class="btn {{ '' if view=='channel' else 'gray' }}" href="{{ url_for('report', view='channel', date=sel_date) }}">채널별</a>
+    <a class="btn {{ '' if view=='hub' else 'gray' }}" href="{{ url_for('report', view='hub', date=sel_date) }}">거점센터별</a>
+    <span style="width:16px"></span>
+    <span class="muted" style="align-self:center">일자</span>
+    <a class="btn {{ 'gray' if sel_date }}" href="{{ url_for('report', view=view) }}">전체</a>
+    {% for d in dates %}
+    <a class="btn {{ '' if sel_date==d else 'gray' }}" href="{{ url_for('report', view=view, date=d) }}">{{ d }}</a>
+    {% endfor %}
+    <span class="sp" style="margin-left:auto"></span>
+    <button class="btn gray" type="button" onclick="copyReport()">📑 복사</button>
+    <a class="btn ok" href="{{ url_for('report_xlsx', view=view, date=sel_date) }}">⬇ 엑셀</a>
+  </div>
+
+  {% if skipped %}
+  <div class="warnbox" style="margin-top:12px">
+    한익스상품명이 아직 없는 상품 <b>{{ skipped }}</b>개는 집계에서 제외됐습니다.
+    <a href="{{ url_for('master_edit', which='product') }}">상품마스터</a>에서 등록하면 포함됩니다.
+  </div>
+  {% endif %}
+
+  <div style="overflow-x:auto;margin-top:16px">
+  <table id="reportTable">
+    <tr>
+      <th style="width:150px">한익스상품명</th>
+      <th style="width:64px">구분</th>
+      {% for key,name in columns %}<th style="text-align:right">{{ name }}</th>{% endfor %}
+      <th style="text-align:right;width:70px">합계</th>
+    </tr>
+    {% for g in groups %}
+    <tr style="background:#eef2ff"><td colspan="{{ columns|length + 3 }}"><b>📅 {{ g.date }}</b></td></tr>
+    {% for r in g.rows %}
+    <tr>
+      <td>{{ r.rep }}</td>
+      <td><span class="pill {{ 'cu' if r.cat=='대월' else 'e24' }}">{{ r.cat }}</span></td>
+      {% for key,name in columns %}
+      <td style="text-align:right">{{ r.cols[key] or '' }}</td>
+      {% endfor %}
+      <td style="text-align:right"><b>{{ r.total }}</b></td>
+    </tr>
+    {% endfor %}
+    <tr style="background:#f8fafc;font-weight:700">
+      <td colspan="2">{{ g.date }} 소계</td>
+      {% for key,name in columns %}<td style="text-align:right">{{ g.sub[key] or '' }}</td>{% endfor %}
+      <td style="text-align:right">{{ g.sub_total }}</td>
+    </tr>
+    {% endfor %}
+    {% if groups %}
+    <tr style="background:#dbe9f7;font-weight:800">
+      <td colspan="2">총합계</td>
+      {% for key,name in columns %}<td style="text-align:right">{{ grand[key] or '' }}</td>{% endfor %}
+      <td style="text-align:right">{{ grand_total }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="{{ columns|length + 3 }}" class="muted" style="text-align:center;padding:26px">
+      집계할 데이터가 없습니다. 먼저 RAW 파일을 업로드하세요.
+    </td></tr>
+    {% endif %}
+  </table>
+  </div>
+  <div class="muted" id="copymsg" style="margin-top:10px;display:none;color:#059669">복사했습니다. 엑셀/메신저에 붙여넣기 하세요.</div>
+</div>
+
+<script>
+function copyReport(){
+  const t=document.getElementById('reportTable');
+  const tsv=[...t.rows].map(r=>[...r.cells].map(c=>c.innerText.trim()).join('\t')).join('\n');
+  navigator.clipboard.writeText(tsv).then(()=>{
+    const m=document.getElementById('copymsg'); m.style.display='block';
+    setTimeout(()=>m.style.display='none',3500);
+  }).catch(()=>alert('복사 실패'));
+}
+</script>
+{% endblock %}
