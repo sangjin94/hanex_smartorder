@@ -370,62 +370,142 @@ def _checklist(ch, sel_date):
     return blocks, grand, sorted(dates, reverse=True)
 
 
+# --- 상품집계(이전 방식): 일자 · 한익스상품명 기준, 채널별/거점센터별 ---
+def _aggregate():
+    """아카이브 전체 → (일자, 한익스상품명, 구분)별 채널·거점센터 수량. skipped=한익스상품명 없는 수량."""
+    agg, dates, hubs, skipped = {}, set(), set(), 0
+    for rec in _load_index():
+        ch, path = rec["ch"], _rec_path(rec)
+        if not os.path.exists(path):
+            continue
+        try:
+            rows, _, _ = sc.process(sc.parse_raw(path, ch), ch)
+        except Exception:
+            continue
+        for row in rows:
+            q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
+            rep = row["대표"]
+            d = _norm_date(row["배송일자"]) or "(일자없음)"
+            if not rep:
+                skipped += q
+                continue
+            hub = row["거점센터"] or "(거점미지정)"
+            dates.add(d); hubs.add(hub)
+            e = agg.setdefault((d, rep, row["구분"]), {"ch": {}, "hub": {}})
+            e["ch"][ch] = e["ch"].get(ch, 0) + q
+            e["hub"][hub] = e["hub"].get(hub, 0) + q
+    return agg, sorted(dates, reverse=True), sorted(hubs), skipped
+
+
+def _report_table(view, sel_date):
+    agg, dates, hubs, skipped = _aggregate()
+    if view == "hub":
+        columns = [(h, h) for h in hubs]
+    else:
+        columns = [(c, sc.CHANNELS[c]["name"]) for c in CH_ORDER]
+    colkeys = [c for c, _ in columns]
+    groups = {}
+    for (d, rep, cat), e in agg.items():
+        if sel_date and d != sel_date:
+            continue
+        src = e["hub"] if view == "hub" else e["ch"]
+        groups.setdefault(d, []).append({"rep": rep, "cat": cat,
+                                         "cols": {k: src.get(k, 0) for k in colkeys},
+                                         "total": sum(src.values())})
+    out, grand, grand_total = [], {k: 0 for k in colkeys}, 0
+    for d in sorted(groups, reverse=True):
+        rows = sorted(groups[d], key=lambda r: (sc.PRODUCT_CATS.index(r["cat"]) if r["cat"] in sc.PRODUCT_CATS else 9, r["rep"]))
+        sub = {k: sum(r["cols"][k] for r in rows) for k in colkeys}
+        sub_total = sum(r["total"] for r in rows)
+        for k in colkeys:
+            grand[k] += sub[k]
+        grand_total += sub_total
+        out.append({"date": d, "rows": rows, "sub": sub, "sub_total": sub_total})
+    return columns, out, grand, grand_total, dates, skipped
+
+
 @app.route("/report")
 def report():
+    mode = "product" if request.args.get("mode") == "product" else "checklist"
+    sel_date = request.args.get("date", "")
+    if mode == "product":
+        view = "hub" if request.args.get("view") == "hub" else "channel"
+        columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
+        return render_template("report.html", mode="product", view=view, sel_date=sel_date,
+                               columns=columns, groups=groups, grand=grand, grand_total=grand_total,
+                               dates=dates, skipped=skipped, cfg=sc.CHANNELS, channels=CH_ORDER, ch="")
     ch = request.args.get("ch", "")
     if ch not in sc.CHANNELS:
         ch = CH_ORDER[0]
-    sel_date = request.args.get("date", "")
     blocks, grand, dates = _checklist(ch, sel_date)
-    return render_template("report.html", ch=ch, cfg=sc.CHANNELS, channels=CH_ORDER,
+    return render_template("report.html", mode="checklist", ch=ch, cfg=sc.CHANNELS, channels=CH_ORDER,
                            sel_date=sel_date, blocks=blocks, grand=grand, dates=dates)
 
 
 @app.route("/report/xlsx")
 def report_xlsx():
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    ch = request.args.get("ch", "")
-    if ch not in sc.CHANNELS:
-        ch = CH_ORDER[0]
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    mode = "product" if request.args.get("mode") == "product" else "checklist"
     sel_date = request.args.get("date", "")
-    blocks, grand, dates = _checklist(ch, sel_date)
-    cfg = sc.CHANNELS[ch]
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "검수리스트"
     yellow = PatternFill("solid", fgColor="FFFFFF00")
     thin = Side(style="thin", color="FFBFBFBF")
     border = Border(top=thin, bottom=thin, left=thin, right=thin)
-    qtylabel = "발주단위수량" if ch == "cu" else "수량"
-    ws.append(["배송센터", "센터명", "상품명", "합계 : %s" % qtylabel])
-    for c in range(1, 5):
-        cell = ws.cell(1, c); cell.font = Font(name="맑은 고딕", size=11, bold=True)
-        cell.fill = PatternFill("solid", fgColor="FFDDEBF7"); cell.border = border
-    def put(r, vals, bold=False, fill=None):
-        for c, v in enumerate(vals, 1):
-            cell = ws.cell(r, c, v)
-            cell.font = Font(name="맑은 고딕", size=10, bold=bold)
-            cell.border = border
-            if fill:
-                cell.fill = fill
-    r = 2
-    for b in blocks:
-        first_hub = True
-        for cb in b["centers"]:
-            first_center = True
-            for prod, q in cb["prods"]:
-                put(r, [b["hub"] if first_hub else "", cb["center"] if first_center else "", prod, q])
-                first_hub = first_center = False
-                r += 1
-            put(r, ["", "%s 요약" % cb["center"], "", cb["sub"]], bold=True, fill=yellow)
-            r += 1
-    put(r, ["총합계", "", "", grand], bold=True, fill=yellow)
-    for i, w in enumerate([20, 22, 30, 16], 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    wb = openpyxl.Workbook(); ws = wb.active
+    today = datetime.datetime.now().strftime("%Y%m%d")
+
+    if mode == "product":
+        view = "hub" if request.args.get("view") == "hub" else "channel"
+        columns, groups, grand, grand_total, dates, skipped = _report_table(view, sel_date)
+        ws.title = "상품집계"
+        headers = ["일자", "한익스상품명", "구분"] + [name for _, name in columns] + ["합계"]
+        ws.append(headers)
+        for c in range(1, len(headers) + 1):
+            ws.cell(1, c).font = Font(name="맑은 고딕", size=11, bold=True); ws.cell(1, c).fill = yellow
+        for g in groups:
+            for r in g["rows"]:
+                ws.append([g["date"], r["rep"], r["cat"]] + [r["cols"][k] for k, _ in columns] + [r["total"]])
+            ws.append(["%s 소계" % g["date"], "", ""] + [g["sub"][k] for k, _ in columns] + [g["sub_total"]])
+        ws.append(["총합계", "", ""] + [grand[k] for k, _ in columns] + [grand_total])
+        for i, w in enumerate([12, 34, 8] + [11] * len(columns) + [10], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        fname = "작업집계_상품별_%s_%s.xlsx" % ("거점센터" if view == "hub" else "채널", today)
+    else:
+        ch = request.args.get("ch", "")
+        if ch not in sc.CHANNELS:
+            ch = CH_ORDER[0]
+        blocks, grand, dates = _checklist(ch, sel_date)
+        cfg = sc.CHANNELS[ch]
+        ws.title = "검수리스트"
+        qtylabel = "발주단위수량" if ch == "cu" else "수량"
+        ws.append(["배송센터", "센터명", "상품명", "합계 : %s" % qtylabel])
+        for c in range(1, 5):
+            ws.cell(1, c).font = Font(name="맑은 고딕", size=11, bold=True)
+            ws.cell(1, c).fill = PatternFill("solid", fgColor="FFDDEBF7"); ws.cell(1, c).border = border
+
+        def put(r, vals, bold=False, fill=None):
+            for c, v in enumerate(vals, 1):
+                cell = ws.cell(r, c, v); cell.font = Font(name="맑은 고딕", size=10, bold=bold); cell.border = border
+                if fill:
+                    cell.fill = fill
+        r = 2
+        for b in blocks:
+            first_hub = True
+            for cb in b["centers"]:
+                first_center = True
+                for prod, q in cb["prods"]:
+                    put(r, [b["hub"] if first_hub else "", cb["center"] if first_center else "", prod, q])
+                    first_hub = first_center = False; r += 1
+                put(r, ["", "%s 요약" % cb["center"], "", cb["sub"]], bold=True, fill=yellow); r += 1
+        put(r, ["총합계", "", "", grand], bold=True, fill=yellow)
+        for i, w in enumerate([20, 22, 30, 16], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        fname = "%s_검수리스트_%s.xlsx" % (cfg["name"], sel_date or "전체")
+
     ws.freeze_panes = "A2"
     bio = io.BytesIO(); wb.save(bio); bio.seek(0)
-    dtag = sel_date or "전체"
-    return send_file(bio, as_attachment=True,
-                     download_name="%s_검수리스트_%s.xlsx" % (cfg["name"], dtag),
+    return send_file(bio, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
