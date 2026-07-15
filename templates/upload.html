@@ -11,12 +11,24 @@
   <form method="post" enctype="multipart/form-data" id="frm" style="margin-top:18px">
     <label class="drop" id="drop">
       <input type="file" name="file" id="file" accept=".xlsx,.xls" style="display:none">
-      <div style="font-size:40px">📄</div>
-      <div style="font-size:16px;font-weight:600;margin-top:6px" id="dropname">여기에 파일을 끌어놓거나 클릭</div>
-      <div class="muted" style="margin-top:4px">.xlsx / .xls · 최대 40MB</div>
+      <!-- 선택 전 -->
+      <div id="emptyState">
+        <div style="font-size:40px">📄</div>
+        <div style="font-size:16px;font-weight:600;margin-top:6px">여기에 파일을 끌어놓거나 클릭</div>
+        <div class="muted" style="margin-top:4px">.xlsx / .xls · 최대 40MB</div>
+      </div>
+      <!-- 선택 후 -->
+      <div id="filledState" style="display:none">
+        <div style="font-size:40px">✅</div>
+        <div style="font-size:17px;font-weight:700;margin-top:6px;color:#065f46" id="fname"></div>
+        <div class="muted" style="margin-top:4px"><span id="fsize"></span> · 파일이 선택되었습니다</div>
+        <div style="margin-top:8px;font-size:13px;color:#2563eb">다른 파일을 고르려면 다시 클릭</div>
+      </div>
     </label>
     <div class="row" style="margin-top:16px">
-      <button class="btn big" type="submit">라벨 생성 →</button>
+      <button class="btn big" type="submit" id="submitBtn" disabled
+              style="opacity:.5;cursor:not-allowed">먼저 파일을 선택하세요</button>
+      <span class="muted" id="submitHint" style="display:none">⏳ 업로드·분석 중입니다. 잠시만 기다려 주세요…</span>
     </div>
   </form>
 
@@ -51,11 +63,34 @@
 </div>
 
 <script>
-  const drop=document.getElementById('drop'),file=document.getElementById('file'),
-        name=document.getElementById('dropname');
-  file.onchange=()=>{ if(file.files[0]) name.textContent=file.files[0].name; };
+  const drop=document.getElementById('drop'), file=document.getElementById('file'),
+        emptyState=document.getElementById('emptyState'), filledState=document.getElementById('filledState'),
+        fname=document.getElementById('fname'), fsize=document.getElementById('fsize'),
+        submitBtn=document.getElementById('submitBtn'), submitHint=document.getElementById('submitHint'),
+        frm=document.getElementById('frm');
+
+  function human(n){ return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB'; }
+  function showFile(){
+    const f=file.files[0];
+    if(!f){ return; }
+    const ok=/\.(xlsx|xls)$/i.test(f.name);
+    if(!ok){ alert('xlsx 또는 xls 파일만 올릴 수 있습니다.'); file.value=''; return; }
+    fname.textContent=f.name; fsize.textContent=human(f.size);
+    emptyState.style.display='none'; filledState.style.display='block';
+    drop.style.borderColor='#059669'; drop.style.background='#ecfdf5';
+    submitBtn.disabled=false; submitBtn.style.opacity='1'; submitBtn.style.cursor='pointer';
+    submitBtn.textContent='라벨 생성 →';
+  }
+  file.onchange=showFile;
   ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drag');}));
-  ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag');}));
-  drop.addEventListener('drop',ev=>{ file.files=ev.dataTransfer.files; if(file.files[0]) name.textContent=file.files[0].name; });
+  ['dragleave','dragend'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',ev=>{ ev.preventDefault(); drop.classList.remove('drag');
+    if(ev.dataTransfer.files.length){ file.files=ev.dataTransfer.files; showFile(); } });
+  // 제출 시: 중복 클릭 방지 + 진행 안내
+  frm.addEventListener('submit',ev=>{
+    if(!file.files[0]){ ev.preventDefault(); alert('먼저 파일을 선택하세요.'); return; }
+    submitBtn.disabled=true; submitBtn.style.opacity='.6'; submitBtn.textContent='⏳ 업로드 중…';
+    submitHint.style.display='inline';
+  });
 </script>
 {% endblock %}

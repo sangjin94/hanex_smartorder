@@ -25,8 +25,11 @@
 </div>
 
 <div class="card" style="margin-top:16px">
-  <h2>사용 방법</h2>
-  <ol class="sub" style="margin:0;padding-left:18px;line-height:1.9">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">사용 방법</h2>
+    <a class="btn gray" href="{{ url_for('guide') }}">📖 자세한 사용법</a>
+  </div>
+  <ol class="sub" style="margin:12px 0 0;padding-left:18px;line-height:1.9">
     <li>채널 선택 → 리테일러에서 받은 RAW(.xlsx/.xls) 업로드</li>
     <li>미매핑 센터·상품 코드가 있으면 화면에서 바로 등록 (다음부터 자동 적용)</li>
     <li><b>부착양식 다운로드</b> → 엑셀에서 그대로 인쇄</li>

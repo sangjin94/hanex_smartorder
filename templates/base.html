@@ -76,6 +76,7 @@
     <a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint=='history' }}">업로드이력</a>
     <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint=='report' }}">작업집계</a>
     <a href="{{ url_for('masters') }}" class="{{ 'active' if request.endpoint in ['masters','master_edit'] }}">마스터관리</a>
+    <a href="{{ url_for('guide') }}" class="{{ 'active' if request.endpoint=='guide' }}">📖 사용법</a>
   </nav>
 </header>
 <div class="wrap">

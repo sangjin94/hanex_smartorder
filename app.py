@@ -590,6 +590,11 @@ def master_import_apply(which):
     return redirect(url_for("master_edit", which=which))
 
 
+@app.route("/guide")
+def guide():
+    return render_template("guide.html", channels=CH_ORDER, cfg=sc.CHANNELS)
+
+
 @app.route("/health")
 def health():
     return jsonify(ok=True)

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}사용법 안내{% endblock %}
+{% block body %}
+<style>
+  .step{display:flex;gap:16px;padding:18px 0;border-top:1px solid var(--line)}
+  .step:first-of-type{border-top:0}
+  .step .no{flex:0 0 40px;height:40px;border-radius:50%;background:var(--brand);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+  .step .body{flex:1}
+  .step h3{margin:2px 0 6px;font-size:17px}
+  .step p{margin:4px 0;color:#334155}
+  .step ul{margin:6px 0;padding-left:18px;color:#334155}
+  .step li{margin:3px 0}
+  .tip{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-top:8px;font-size:14px}
+  .warn{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;margin-top:8px;font-size:14px}
+  .faq{padding:12px 0;border-top:1px solid var(--line)}
+  .faq b{color:#0f172a}
+  .flow{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 2px}
+  .flow .f{background:#f1f5f9;border-radius:10px;padding:10px 14px;font-weight:600;font-size:14px}
+  .flow .arr{align-self:center;color:#94a3b8;font-weight:700}
+</style>
+
+<div class="card">
+  <h1>📖 사용법 안내</h1>
+  <div class="sub">스마트오더 라벨 도구를 처음 쓰는 분도 바로 따라 할 수 있게 정리했습니다.</div>
+
+  <p style="margin-top:14px;color:#334155">
+    리테일러(CU·GS·이마트24)에서 받은 <b>스마트오더 RAW 엑셀</b>을 올리면,
+    우리(한익스) 기준으로 <b>센터명 → 이고센터</b>, <b>상품코드 → 한익스상품명</b>을 매핑해서
+    <b>부착양식(A4) 라벨</b>과 <b>TOTAL 표지</b>를 만들어 줍니다.
+  </p>
+  <div class="flow">
+    <div class="f">① 채널 선택 · RAW 업로드</div><span class="arr">→</span>
+    <div class="f">② 미매핑 등록(센터·상품)</div><span class="arr">→</span>
+    <div class="f">③ 라벨·표지 출력</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>단계별 사용법</h2>
+
+  <div class="step">
+    <div class="no">1</div>
+    <div class="body">
+      <h3>채널 선택하고 RAW 파일 올리기</h3>
+      <p><b>라벨생성</b> 메뉴에서 채널(CU / GS / 이마트24)을 고르고, 리테일러 포털에서 내려받은 원본 엑셀을 올립니다.</p>
+      <ul>
+        <li>지원 형식: <code class="k">.xlsx</code> / <code class="k">.xls</code> (GS는 GS25·GS슈퍼 둘 다 자동 인식)</li>
+        <li>파일을 고르면 <b>초록색 ✅ 로 선택 확인</b>이 뜹니다. 그 뒤 <b>라벨 생성 →</b> 버튼을 누르세요.</li>
+        <li>올린 파일은 자동으로 <b>보관</b>되어 나중에 <b>업로드이력</b>에서 다시 열 수 있습니다.</li>
+      </ul>
+      <div class="tip">💡 컬럼 이름으로 자동 인식하므로 열 순서가 달라도 됩니다. 센터명·상품코드·수량만 있으면 됩니다.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="no">2</div>
+    <div class="body">
+      <h3>미매핑 코드 등록하기</h3>
+      <p>처음 보는 센터·상품이 있으면 결과 화면에 <b>미매핑</b>으로 표시됩니다. 그 자리에서 바로 등록하면 <b>다음부터 자동 적용</b>됩니다.</p>
+      <ul>
+        <li><b>센터</b>: RAW의 센터명 → 우리 <b>이고센터</b>(거점)를 드롭다운에서 선택</li>
+        <li><b>상품</b>: 상품코드 → <b>한익스상품명</b>(표지에 찍히는 이름) + <b>구분</b>(대월/프리미엄) 지정</li>
+      </ul>
+      <div class="warn">⚠ <b>한익스상품명이 없으면 출력이 막힙니다.</b> 표지에 빈 이름이 찍히는 걸 막기 위해서예요.
+        미매핑 상품을 모두 등록하면 바로 다운로드·인쇄됩니다.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="no">3</div>
+    <div class="body">
+      <h3>라벨·표지 출력하기</h3>
+      <ul>
+        <li><b>⬇ 부착양식 다운로드</b>: 기존 양식과 동일한 A4 라벨 엑셀 (구분에 따라 대월/프리미엄 직매장 제목 자동)</li>
+        <li><b>🖨 라벨 미리보기·인쇄</b>: 화면에서 바로 확인하고 인쇄 (라벨 1장 = A4 1페이지)</li>
+        <li><b>TOTAL 표지</b>: 화면에서 바로 보고 <b>🖼 이미지 복사</b>(카톡·엑셀 붙여넣기) 또는 <b>PNG 저장</b>·인쇄</li>
+      </ul>
+      <div class="tip">💡 라벨 <b>상품명</b>은 화주(리테일러) 상품명 그대로, <b>표지·집계</b>는 한익스상품명으로 표시됩니다.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>부가 기능</h2>
+  <div class="step">
+    <div class="no">🗂</div>
+    <div class="body">
+      <h3>마스터 관리</h3>
+      <p>센터·상품 매핑을 화면에서 한 건씩 고치거나, <b>엑셀로 내려받아 한 번에 수정 후 업로드</b>할 수 있습니다.</p>
+      <ul>
+        <li>센터마스터: <b>전 채널 공통</b> (센터명 → 이고센터). 한 번 등록하면 CU·GS·이마트24 모두 적용</li>
+        <li>상품마스터: <b>상품 1개 = 1줄</b>. 같은 상품이라도 채널마다 코드가 다르니 여러 코드를 <b>쉼표로</b> 넣으세요</li>
+        <li>엑셀 업로드 시 <b>추가·수정·삭제 내역을 먼저 보여주고</b> 확인 후 반영(자동 백업)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="step">
+    <div class="no">📥</div>
+    <div class="body">
+      <h3>업로드 이력</h3>
+      <p>올린 RAW 파일이 채널별로 <b>누적 보관</b>됩니다. 언제든 <b>다시 열기 · 부착양식 재다운로드 · 원본 내려받기 · 삭제</b>가 가능합니다.</p>
+    </div>
+  </div>
+  <div class="step">
+    <div class="no">📊</div>
+    <div class="body">
+      <h3>작업 집계</h3>
+      <p>누적된 업로드 전체를 <b>일자별 · 한익스상품명 기준</b>으로 집계합니다.</p>
+      <ul>
+        <li><b>채널별</b>(CU/GS/이마트24) 또는 <b>거점센터별</b> 보기 전환</li>
+        <li>일자 필터 · 일자별 소계 · 총합계 · 클립보드 복사 · 엑셀 다운로드</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>자주 묻는 질문</h2>
+  <div class="faq"><b>Q. 다운로드 버튼을 눌렀는데 출력이 안 돼요.</b><br>
+    한익스상품명이 등록되지 않은 상품이 있으면 막힙니다. 결과 화면의 <b>미매핑 상품</b>을 모두 등록하세요.</div>
+  <div class="faq"><b>Q. 파일이 올라갔는지 모르겠어요.</b><br>
+    파일을 고르면 업로드 칸이 <b>초록색 ✅ + 파일명</b>으로 바뀝니다. 그 뒤 <b>라벨 생성 →</b>을 누르면 결과 화면으로 넘어갑니다.</div>
+  <div class="faq"><b>Q. GS25와 GS슈퍼를 따로 올려야 하나요?</b><br>
+    아니요. GS 채널 하나에서 둘 다 자동으로 인식합니다.</div>
+  <div class="faq"><b>Q. 센터/상품 이름이 조금 바뀌면 다시 등록해야 하나요?</b><br>
+    센터는 센터명, 상품은 상품코드로 매핑합니다. 코드가 같으면 이름이 바뀌어도 유지됩니다.</div>
+
+  <div class="row" style="margin-top:16px">
+    <a class="btn big" href="{{ url_for('index') }}">시작하기 →</a>
+  </div>
+</div>
+{% endblock %}
