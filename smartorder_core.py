@@ -632,7 +632,7 @@ def build_labelout_sheet(ws, headers, rows):
 
 
 def compute_totals(rows):
-    """TOTAL 표지용 집계: 상품(대표)별 수량, 거점센터별 수량. (수량 내림차순)"""
+    """TOTAL 표지용 집계: 상품(대표)별 수량, 거점센터별 수량. (이름 오름차순)"""
     prod, hub = {}, {}
     for row in rows:
         q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
@@ -640,8 +640,8 @@ def compute_totals(rows):
             prod[row["대표"]] = prod.get(row["대표"], 0) + q
         if row["거점센터"]:
             hub[row["거점센터"]] = hub.get(row["거점센터"], 0) + q
-    prod_list = sorted(prod.items(), key=lambda x: -x[1])
-    hub_list = sorted(hub.items(), key=lambda x: -x[1])
+    prod_list = sorted(prod.items())
+    hub_list = sorted(hub.items())
     return prod_list, hub_list
 
 # ----------------------------------------------------------------------------
@@ -774,10 +774,10 @@ def build_total_sheet(ws, rows, cfg):
     ws.cell(2, 6, "이고센터명").font = Font(name=FONT, size=11, bold=True)
     ws.cell(2, 7, "이고수량").font = Font(name=FONT, size=11, bold=True)
     r = 3
-    for i, (k, v) in enumerate(sorted(prod.items(), key=lambda x: -x[1]), 1):
+    for i, (k, v) in enumerate(sorted(prod.items()), 1):   # 이름 오름차순
         ws.cell(r, 2, i); ws.cell(r, 3, k); ws.cell(r, 4, v); r += 1
     r = 3
-    for k, v in sorted(hub.items(), key=lambda x: -x[1]):
+    for k, v in sorted(hub.items()):
         ws.cell(r, 6, k); ws.cell(r, 7, v); r += 1
     for col, w in {"B": 6, "C": 34, "D": 8, "E": 3, "F": 16, "G": 10}.items():
         ws.column_dimensions[col].width = w
