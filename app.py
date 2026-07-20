@@ -313,15 +313,9 @@ def history_delete(uid):
 
 
 # ---------------- 작업 집계(검수리스트): 채널·일자별 · 이고센터>센터>상품(화주)>수량 ----------------
-def _norm_date(s):
-    """'20260715' / '2026-07-14 00:00:00' / '2026-07-14' → '2026-07-15'. 없으면 ''"""
-    s = (s or "").strip()
-    if not s:
-        return ""
-    digits = re.sub(r"[^0-9]", "", s.split(" ")[0])
-    if len(digits) >= 8:
-        return "%s-%s-%s" % (digits[0:4], digits[4:6], digits[6:8])
-    return s
+def _upload_date(rec):
+    """집계 기준 일자 = 파일을 올린 날짜(YYYY-MM-DD). RAW의 배송일자가 아니라 업로드 일자."""
+    return (rec.get("uploaded_at") or "")[:10] or "(일자없음)"
 
 
 def _hubkey(h):
@@ -336,6 +330,10 @@ def _checklist(ch, sel_date):
     for rec in _load_index():
         if rec["ch"] != ch:
             continue
+        d = _upload_date(rec)          # 집계 기준 = 업로드 일자
+        dates.add(d)
+        if sel_date and d != sel_date:
+            continue
         path = _rec_path(rec)
         if not os.path.exists(path):
             continue
@@ -344,10 +342,6 @@ def _checklist(ch, sel_date):
         except Exception:
             continue
         for row in rows:
-            d = _norm_date(row["배송일자"]) or "(일자없음)"
-            dates.add(d)
-            if sel_date and d != sel_date:
-                continue
             q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
             key = (row["거점센터"] or "(미지정)", row["센터"] or "", row["상품명"] or "")
             agg[key] = agg.get(key, 0) + q
@@ -376,6 +370,8 @@ def _aggregate():
     agg, dates, hubs, skipped = {}, set(), set(), 0
     for rec in _load_index():
         ch, path = rec["ch"], _rec_path(rec)
+        d = _upload_date(rec)          # 집계 기준 = 업로드 일자
+        dates.add(d)
         if not os.path.exists(path):
             continue
         try:
@@ -385,12 +381,11 @@ def _aggregate():
         for row in rows:
             q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
             rep = row["대표"]
-            d = _norm_date(row["배송일자"]) or "(일자없음)"
             if not rep:
                 skipped += q
                 continue
             hub = row["거점센터"] or "(거점미지정)"
-            dates.add(d); hubs.add(hub)
+            hubs.add(hub)
             e = agg.setdefault((d, rep, row["구분"]), {"ch": {}, "hub": {}})
             e["ch"][ch] = e["ch"].get(ch, 0) + q
             e["hub"][hub] = e["hub"].get(hub, 0) + q
