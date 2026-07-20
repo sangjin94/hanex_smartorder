@@ -3,7 +3,10 @@
 {% block body %}
 <div class="card">
   <h1>마스터 관리</h1>
-  <div class="sub">센터는 <b>센터명</b>으로, 상품은 <b>상품코드</b>로 매핑합니다. 센터마스터는 전 채널(CU·GS·이마트24) 공통이라 한 번 등록하면 모든 채널에 적용됩니다.</div>
+  <div class="sub">
+    <b>🏢 {{ cur_shipper_name }}</b>의 마스터입니다 (화주사별로 분리 — 헤더에서 화주사를 바꾸면 그 화주사 마스터가 열립니다).
+    센터는 <b>센터명</b>으로, 상품은 <b>상품코드</b>로 매핑하며, 센터마스터는 전 채널(CU·GS·이마트24) 공통입니다.
+  </div>
   <div class="grid">
     {% set colors = {'center':'#7c3aed','product':'#1d4ed8'} %}
     {% for key,d in defs.items() %}

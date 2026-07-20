@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}화주사 관리{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>화주사 관리</h1>
+  <div class="sub">
+    화주사마다 <b>상품·센터 마스터, 업로드 이력, 작업 집계가 완전히 분리</b>됩니다.
+    상단 헤더의 🏢 선택으로 화주사를 전환하면 모든 화면이 그 화주사 기준으로 바뀝니다.
+  </div>
+
+  <!-- 추가 -->
+  <form method="post" action="{{ url_for('shippers_save') }}" class="row" style="margin-top:16px;gap:10px;align-items:flex-end">
+    <input type="hidden" name="action" value="add">
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span class="muted" style="font-size:12px">화주사 이름 (라벨 제목 등에 표시)</span>
+      <input type="text" name="name" placeholder="예: 하이트진로" style="width:260px" required>
+    </label>
+    <button class="btn ok" type="submit">화주사 추가</button>
+  </form>
+  <div class="muted" style="margin-top:6px;font-size:13px">
+    새 화주사는 마스터가 비어 있는 상태로 시작합니다. 전환 후 마스터관리에서 등록하거나 엑셀로 올리세요.
+  </div>
+
+  <table style="margin-top:18px">
+    <tr>
+      <th style="width:34%">화주사</th>
+      <th>데이터 현황</th>
+      <th style="width:220px">관리</th>
+    </tr>
+    {% for sid, sp in shippers.items() %}
+    <tr>
+      <td>
+        <form method="post" action="{{ url_for('shippers_save') }}" class="row" style="gap:6px">
+          <input type="hidden" name="action" value="rename">
+          <input type="hidden" name="sid" value="{{ sid }}">
+          <input type="text" name="name" value="{{ sp.name }}" style="max-width:200px">
+          <button class="btn gray" type="submit" style="padding:7px 12px">이름저장</button>
+        </form>
+        {% if sid == cur_shipper %}<span class="pill" style="background:#dbeafe;color:#1d4ed8;margin-top:4px;display:inline-block">현재 선택됨</span>{% endif %}
+      </td>
+      <td class="muted">
+        상품 {{ stats[sid].products }}개 · 센터 {{ stats[sid].centers }}개 · 업로드 {{ stats[sid].uploads }}건
+      </td>
+      <td>
+        <div class="row" style="gap:6px">
+          {% if sid != cur_shipper %}
+          <form method="post" action="{{ url_for('shipper_select') }}">
+            <input type="hidden" name="shipper" value="{{ sid }}">
+            <button class="btn" type="submit" style="padding:7px 12px">전환</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('shippers_save') }}"
+                onsubmit="return confirm('화주사 삭제: {{ sp.name }}\n(업로드 이력이 있으면 삭제되지 않습니다)')">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="sid" value="{{ sid }}">
+            <button class="btn" type="submit" style="background:#fee2e2;color:#b91c1c;padding:7px 12px">삭제</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

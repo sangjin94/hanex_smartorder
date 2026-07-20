@@ -18,18 +18,78 @@ MASTER_DIR = os.environ.get("SMARTORDER_MASTERS") or os.path.join(BASE, "masters
 # seed(동봉 기본 마스터) 위치: exe에서는 번들 경로(SMARTORDER_SEED)로 지정.
 SEED_DIR = os.environ.get("SMARTORDER_SEED") or os.path.join(BASE, "masters")
 
-def ensure_masters_seeded():
-    """MASTER_DIR가 비어 있으면 코드 동봉 seed(masters/)를 복사한다(최초 배포용)."""
-    if os.path.abspath(MASTER_DIR) == os.path.abspath(SEED_DIR):
-        return
+# ----------------------------------------------------------------------------
+# 화주사(shipper): 마스터·이력·집계를 화주사별로 완전 분리. 마스터는 MASTER_DIR/<화주사id>/*.json
+# ----------------------------------------------------------------------------
+SHIPPERS_FILE = "shippers.json"        # MASTER_DIR 루트: {id: {name}}
+DEFAULT_SHIPPER = "ob"                 # 기존 데이터(오비맥주)의 화주사 id
+_cur_shipper = DEFAULT_SHIPPER
+
+
+def set_shipper(sid):
+    global _cur_shipper
+    _cur_shipper = sid or DEFAULT_SHIPPER
+
+
+def get_shipper():
+    return _cur_shipper
+
+
+def load_shippers():
+    p = os.path.join(MASTER_DIR, SHIPPERS_FILE)
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if d:
+            return d
+    return {DEFAULT_SHIPPER: {"name": "오비맥주"}}
+
+
+def save_shippers(d):
     os.makedirs(MASTER_DIR, exist_ok=True)
+    with open(os.path.join(MASTER_DIR, SHIPPERS_FILE), "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
+
+
+def shipper_name(sid=None):
+    return load_shippers().get(sid or _cur_shipper, {}).get("name", sid or _cur_shipper)
+
+
+def ensure_masters_seeded():
+    """마스터 저장소 초기화.
+    - 구버전 평면 구조(MASTER_DIR/center.json)가 남아 있으면 기본 화주사(ob/) 아래로 이동
+    - 외부 MASTER_DIR(배포/exe)가 비어 있으면 seed 복사
+    """
     import shutil
-    for fn in os.listdir(SEED_DIR):
-        if not fn.endswith(".json"):
-            continue
-        dst = os.path.join(MASTER_DIR, fn)
-        if not os.path.exists(dst):
-            shutil.copy2(os.path.join(SEED_DIR, fn), dst)
+    os.makedirs(MASTER_DIR, exist_ok=True)
+    # 1) 구버전 평면 → ob/ 이동 (외부 데이터 폴더가 옛 구조인 경우)
+    flat = [fn for fn in ("center.json", "product.json", "product_names.json")
+            if os.path.exists(os.path.join(MASTER_DIR, fn))]
+    if flat:
+        obdir = os.path.join(MASTER_DIR, DEFAULT_SHIPPER)
+        os.makedirs(obdir, exist_ok=True)
+        for fn in flat:
+            dst = os.path.join(obdir, fn)
+            if not os.path.exists(dst):
+                shutil.move(os.path.join(MASTER_DIR, fn), dst)
+            else:
+                os.remove(os.path.join(MASTER_DIR, fn))
+    # 2) 외부 폴더 seed (기본 화주사 + 화주사 목록)
+    if os.path.abspath(MASTER_DIR) != os.path.abspath(SEED_DIR):
+        if not os.path.exists(os.path.join(MASTER_DIR, SHIPPERS_FILE)) and \
+                os.path.exists(os.path.join(SEED_DIR, SHIPPERS_FILE)):
+            shutil.copy2(os.path.join(SEED_DIR, SHIPPERS_FILE), os.path.join(MASTER_DIR, SHIPPERS_FILE))
+        seed_ob = os.path.join(SEED_DIR, DEFAULT_SHIPPER)
+        # seed가 아직 평면 구조인 경우(구버전 번들)도 지원
+        seed_src = seed_ob if os.path.isdir(seed_ob) else SEED_DIR
+        obdir = os.path.join(MASTER_DIR, DEFAULT_SHIPPER)
+        os.makedirs(obdir, exist_ok=True)
+        for fn in os.listdir(seed_src):
+            if not fn.endswith(".json") or fn == SHIPPERS_FILE:
+                continue
+            dst = os.path.join(obdir, fn)
+            if not os.path.exists(dst):
+                shutil.copy2(os.path.join(seed_src, fn), dst)
 
 # ----------------------------------------------------------------------------
 # 채널 정의
@@ -89,7 +149,7 @@ CHANNELS = {
     "e24": {
         "name": "이마트24",
         "tag": "E-24",
-        "title_tpl": "오비맥주 {jm}\n(E-24 스마트오더)",
+        "title_tpl": "{shipper} {jm}\n(E-24 스마트오더)",   # {shipper}=화주사명(예: 오비맥주)
         "center_label": "E-24센터",
         "hub_col": "한익스",         # E24 양식은 이고센터 컬럼명이 '한익스'
         "label_product": "raw",     # 라벨 상품명 = 화주상품명(원본). 표지는 대표(한익스상품명)
@@ -129,9 +189,10 @@ def product_rep_cat(pm, code):
 
 
 def make_title(cfg, cat):
-    """상품 구분에 따른 라벨 제목. 대월→대월직매장, 프리미엄→프리미엄직매장."""
+    """상품 구분에 따른 라벨 제목. 대월→대월직매장, 프리미엄→프리미엄직매장.
+    {shipper}가 있는 템플릿(E24)은 현재 화주사명으로 채운다."""
     jm = (cat or DEFAULT_CAT) + "직매장"
-    return cfg["title_tpl"].format(jm=jm)
+    return cfg["title_tpl"].format(jm=jm, shipper=shipper_name())
 
 
 def cover_title(cfg, rows):
@@ -168,15 +229,17 @@ def to_int(v):
 # 마스터 로드/저장
 # ----------------------------------------------------------------------------
 def load_master(fname):
-    p = os.path.join(MASTER_DIR, fname)
+    # 마스터는 화주사별 폴더(MASTER_DIR/<화주사id>/)에 저장
+    p = os.path.join(MASTER_DIR, _cur_shipper, fname)
     if not os.path.exists(p):
         return {}
     with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_master(fname, data):
-    p = os.path.join(MASTER_DIR, fname)
-    with open(p, "w", encoding="utf-8") as f:
+    d = os.path.join(MASTER_DIR, _cur_shipper)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, fname), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
 
 def all_hubs():
@@ -361,15 +424,60 @@ def _read_any(path):
     wb.close()
     return name, rows
 
-def _pick_sheet(path, hints):
+def list_sheets(path, hints=()):
+    """업로드 파일의 시트 목록: [{name, preview(첫 데이터행 몇 칸), hint(자동인식 후보 여부)}].
+    시트가 2개 이상이면 사용자에게 선택을 받기 위한 정보."""
+    ext = os.path.splitext(path)[1].lower()
+    out = []
+    if ext == ".xls":
+        import xlrd
+        wb = xlrd.open_workbook(path)
+        for ws in wb.sheets():
+            prev = []
+            for i in range(min(ws.nrows, 4)):
+                vals = [norm(ws.cell_value(i, j)) for j in range(min(ws.ncols, 6))]
+                if any(vals):
+                    prev = [v for v in vals if v]
+                    break
+            out.append({"name": ws.name, "preview": prev,
+                        "hint": any(h in ws.name for h in hints)})
+        return out
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    for ws in wb.worksheets:
+        ws.reset_dimensions()
+        prev = []
+        for row in ws.iter_rows(min_row=1, max_row=4, max_col=6, values_only=True):
+            vals = [norm(v) for v in row]
+            if any(vals):
+                prev = [v for v in vals if v]
+                break
+        out.append({"name": ws.title, "preview": prev,
+                    "hint": any(h in ws.title for h in hints)})
+    wb.close()
+    return out
+
+
+def default_sheet(sheets):
+    """자동 인식 기본값: 힌트에 걸린 첫 시트, 없으면 첫 시트."""
+    for s in sheets:
+        if s["hint"]:
+            return s["name"]
+    return sheets[0]["name"] if sheets else None
+
+
+def _pick_sheet(path, hints, sheet=None):
+    """sheet를 지정하면 그 시트를, 아니면 시트명 힌트로 자동 선택."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".xls":
         import xlrd
         wb = xlrd.open_workbook(path)
         best = wb.sheet_by_index(0)
-        for ws in wb.sheets():
-            if any(h in ws.name for h in hints):
-                best = ws; break
+        if sheet and sheet in wb.sheet_names():
+            best = wb.sheet_by_name(sheet)
+        else:
+            for ws in wb.sheets():
+                if any(h in ws.name for h in hints):
+                    best = ws; break
         def cval(i, j):
             # xls는 날짜가 실수(시리얼)로 저장됨 → datetime 복원(라벨출력 시트에 원본 날짜 유지)
             if best.cell_type(i, j) == xlrd.XL_CELL_DATE:
@@ -381,9 +489,12 @@ def _pick_sheet(path, hints):
         return best.name, [[cval(i, j) for j in range(best.ncols)] for i in range(best.nrows)]
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     target = wb.worksheets[0]
-    for ws in wb.worksheets:
-        if any(h in ws.title for h in hints):
-            target = ws; break
+    if sheet and sheet in wb.sheetnames:
+        target = wb[sheet]
+    else:
+        for ws in wb.worksheets:
+            if any(h in ws.title for h in hints):
+                target = ws; break
     target.reset_dimensions()   # 시트 크기를 A1:A1로 잘못 써두는 RAW가 있어(E24) 선언값을 믿지 않는다
     rows = [list(r) for r in target.iter_rows(values_only=True)]
     name = target.title
@@ -422,9 +533,9 @@ def _find_header(rows, cfg):
             best_row, best_idx, best_hits = r, idx, hits
     return best_row, best_idx
 
-def parse_raw(path, channel):
+def parse_raw(path, channel, sheet=None):
     cfg = CHANNELS[channel]
-    _, rows = _pick_sheet(path, cfg["raw"]["sheet_hint"])
+    _, rows = _pick_sheet(path, cfg["raw"]["sheet_hint"], sheet)
     hrow, idx = _find_header(rows, cfg)
     required = ["center_name", "prod_code", "qty"]
     missing = [k for k in required if k not in idx]
@@ -537,7 +648,7 @@ def sort_rows(rows):
 REP_COL = "상품명(대표)"   # 라벨출력(폼텍) 시트의 한익스상품명 컬럼명
 
 
-def labelout_grid(path, channel):
+def labelout_grid(path, channel, sheet=None):
     """폼텍 디자인프로용 '라벨출력' 그리드.
 
     RAW 원본 컬럼을 그대로 보존하고 뒤에 매핑 컬럼 2개를 덧붙인다.
@@ -547,7 +658,7 @@ def labelout_grid(path, channel):
     반환: (headers, rows) — rows의 셀은 RAW 원본 값(날짜는 datetime 유지).
     """
     cfg = CHANNELS[channel]
-    _, grid = _pick_sheet(path, cfg["raw"]["sheet_hint"])
+    _, grid = _pick_sheet(path, cfg["raw"]["sheet_hint"], sheet)
     hrow, idx = _find_header(grid, cfg)
     if "prod_code" not in idx or "qty" not in idx:
         raise ValueError("RAW에서 필수 컬럼을 찾지 못했습니다(라벨출력).")
@@ -793,12 +904,12 @@ def build_total_sheet(ws, rows, cfg):
     for col, w in {"B": 6, "C": 34, "D": 8, "E": 3, "F": 16, "G": 10}.items():
         ws.column_dimensions[col].width = w
 
-def generate_labelout_workbook(path, channel):
+def generate_labelout_workbook(path, channel, sheet=None):
     """폼텍 디자인프로 전용: 'lowdata(라벨출력)' 시트 하나만 담은 xlsx."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "lowdata(라벨출력)"
-    headers, grid = labelout_grid(path, channel)
+    headers, grid = labelout_grid(path, channel, sheet)
     build_labelout_sheet(ws, headers, grid)
     bio = io.BytesIO()
     wb.save(bio)
@@ -806,7 +917,7 @@ def generate_labelout_workbook(path, channel):
     return bio
 
 
-def generate_workbook(rows, channel, path=None):
+def generate_workbook(rows, channel, path=None, sheet=None):
     """path를 주면 폼텍용 'lowdata(라벨출력)' 시트를 첫 탭으로 함께 생성(RAW 원본 + 매핑 컬럼)."""
     cfg = CHANNELS[channel]
     rows = sort_rows(rows)
@@ -818,7 +929,7 @@ def generate_workbook(rows, channel, path=None):
     ws_first = wb.active
     if path:
         ws_first.title = "lowdata(라벨출력)"
-        headers, grid = labelout_grid(path, channel)
+        headers, grid = labelout_grid(path, channel, sheet)
         build_labelout_sheet(ws_first, headers, grid)
         ws_total = wb.create_sheet("TOTAL(표지)")
     else:

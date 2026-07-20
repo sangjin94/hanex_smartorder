@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.name }} 시트 선택{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1><span class="pill {{ch}}">{{ cfg.name }}</span> 어느 시트로 라벨을 만들까요?</h1>
+    <a href="{{ url_for('upload', ch=ch) }}" class="muted">← 다시 업로드</a>
+  </div>
+  <div class="sub">파일: <b>{{ filename }}</b> · 시트가 {{ sheets|length }}개 있습니다.
+    자동 인식된 시트가 미리 선택되어 있으니 확인 후 진행하세요.</div>
+
+  <form method="post" style="margin-top:16px">
+    <table>
+      <tr><th style="width:46px"></th><th style="width:30%">시트명</th><th>첫 행 미리보기</th></tr>
+      {% for s in sheets %}
+      <tr onclick="this.querySelector('input').checked=true" style="cursor:pointer">
+        <td style="text-align:center">
+          <input type="radio" name="sheet" value="{{ s.name }}" {{ 'checked' if s.name==picked }}
+                 style="width:16px;height:16px">
+        </td>
+        <td>
+          <b>{{ s.name }}</b>
+          {% if s.name==picked %}<span class="pill" style="background:#dbeafe;color:#1d4ed8;margin-left:6px">자동 인식</span>{% endif %}
+        </td>
+        <td class="muted" style="font-size:12px">
+          {{ s.preview|join(' · ') if s.preview else '(빈 시트)' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="row" style="margin-top:16px">
+      <button class="btn big" type="submit">이 시트로 라벨 생성 →</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

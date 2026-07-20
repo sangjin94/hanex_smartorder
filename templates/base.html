@@ -70,12 +70,23 @@
 </head>
 <body>
 <header class="top">
-  <div class="logo">🏷️ 스마트오더 라벨 <small>한익스프레스 · 대월직매장</small></div>
+  <div class="logo">🏷️ 스마트오더 라벨 <small>한익스프레스 · 직매장</small></div>
+  <!-- 화주사 선택: 마스터·업로드이력·작업집계가 모두 이 화주사 기준으로 바뀐다 -->
+  <form method="post" action="{{ url_for('shipper_select') }}" style="margin:0">
+    <select name="shipper" onchange="this.form.submit()"
+            style="width:auto;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.3);
+                   background:rgba(255,255,255,.12);color:#fff;font-size:13px;font-weight:600">
+      {% for sid, sp in shippers.items() %}
+      <option value="{{ sid }}" {{ 'selected' if sid==cur_shipper }} style="color:#0f172a">🏢 {{ sp.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
   <nav>
     <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint=='index' }}">라벨생성</a>
     <a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint=='history' }}">업로드이력</a>
     <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint=='report' }}">작업집계</a>
     <a href="{{ url_for('masters') }}" class="{{ 'active' if request.endpoint in ['masters','master_edit'] }}">마스터관리</a>
+    <a href="{{ url_for('shippers_page') }}" class="{{ 'active' if request.endpoint=='shippers_page' }}">화주사</a>
     <a href="{{ url_for('guide') }}" class="{{ 'active' if request.endpoint=='guide' }}">📖 사용법</a>
   </nav>
 </header>

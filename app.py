@@ -45,6 +45,96 @@ sc.ensure_masters_seeded()
 
 CH_ORDER = ["cu", "gs", "e24"]
 
+
+# ---------------- 화주사(shipper): 마스터·이력·집계 전부 화주사별 분리 ----------------
+@app.before_request
+def _resolve_shipper():
+    shippers = sc.load_shippers()
+    sid = request.cookies.get("shipper", "")
+    if sid not in shippers:
+        sid = sc.DEFAULT_SHIPPER if sc.DEFAULT_SHIPPER in shippers else sorted(shippers)[0]
+    sc.set_shipper(sid)
+
+
+@app.context_processor
+def _inject_shipper():
+    shippers = sc.load_shippers()
+    cur = sc.get_shipper()
+    return {"shippers": shippers, "cur_shipper": cur,
+            "cur_shipper_name": shippers.get(cur, {}).get("name", cur)}
+
+
+@app.route("/shipper/select", methods=["POST"])
+def shipper_select():
+    sid = request.form.get("shipper", "")
+    if sid not in sc.load_shippers():
+        abort(400)
+    resp = redirect(request.referrer or url_for("index"))
+    resp.set_cookie("shipper", sid, max_age=3600 * 24 * 365)
+    return resp
+
+
+@app.route("/shippers")
+def shippers_page():
+    shippers = sc.load_shippers()
+    # 화주사별 데이터 현황(마스터 수 · 업로드 수)
+    stats = {}
+    idx = _load_index()
+    for sid in shippers:
+        pdir = os.path.join(sc.MASTER_DIR, sid)
+        def _cnt(fn):
+            p = os.path.join(pdir, fn)
+            if not os.path.exists(p):
+                return 0
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return len(json.load(f))
+            except Exception:
+                return 0
+        stats[sid] = {"products": _cnt("product.json"), "centers": _cnt("center.json"),
+                      "uploads": sum(1 for r in idx if r.get("sp", sc.DEFAULT_SHIPPER) == sid)}
+    return render_template("shippers.html", shippers=shippers, stats=stats)
+
+
+@app.route("/shippers/save", methods=["POST"])
+def shippers_save():
+    shippers = sc.load_shippers()
+    act = request.form.get("action")
+    if act == "add":
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("화주사 이름을 입력해 주세요.", "error")
+        elif any(v.get("name") == name for v in shippers.values()):
+            flash("이미 있는 화주사입니다: %s" % name, "error")
+        else:
+            sid = "s" + uuid.uuid4().hex[:6]
+            shippers[sid] = {"name": name}
+            sc.save_shippers(shippers)
+            flash("화주사 추가: %s (마스터는 비어 있는 상태로 시작 — 마스터관리에서 등록하거나 엑셀 업로드)" % name, "ok")
+    elif act == "rename":
+        sid = request.form.get("sid", "")
+        name = request.form.get("name", "").strip()
+        if sid in shippers and name:
+            old = shippers[sid]["name"]
+            shippers[sid]["name"] = name
+            sc.save_shippers(shippers)
+            flash("이름 변경: %s → %s" % (old, name), "ok")
+    elif act == "delete":
+        sid = request.form.get("sid", "")
+        if sid == sc.DEFAULT_SHIPPER:
+            flash("기본 화주사(오비맥주)는 삭제할 수 없습니다.", "error")
+        elif len(shippers) <= 1:
+            flash("화주사가 하나뿐이라 삭제할 수 없습니다.", "error")
+        elif sid in shippers:
+            has_data = any(r.get("sp") == sid for r in _load_index())
+            if has_data:
+                flash("업로드 이력이 있는 화주사는 삭제할 수 없습니다. 이력을 먼저 삭제해 주세요.", "error")
+            else:
+                name = shippers.pop(sid)["name"]
+                sc.save_shippers(shippers)
+                flash("화주사 삭제: %s (마스터 폴더는 디스크에 남아 있습니다)" % name, "ok")
+    return redirect(url_for("shippers_page"))
+
 # ---------------- 업로드 아카이브(영구 누적) ----------------
 # 배포 시 git 밖 영구 디렉터리로 분리(SMARTORDER_ARCHIVE). 기본은 앱 폴더 archive/.
 ARCHIVE_DIR = os.environ.get("SMARTORDER_ARCHIVE") or os.path.join(sc.BASE, "archive")
@@ -75,7 +165,17 @@ def _rec_by_id(uid):
     return None
 
 def _rec_path(rec):
+    # 신규: archive/<화주사>/<채널>/, 구버전(화주사 도입 전): archive/<채널>/
+    p = os.path.join(ARCHIVE_DIR, rec.get("sp", sc.DEFAULT_SHIPPER), rec["ch"], rec["fname"])
+    if os.path.exists(p):
+        return p
     return os.path.join(ARCHIVE_DIR, rec["ch"], rec["fname"])
+
+
+def _index_cur():
+    """현재 화주사의 업로드 이력만. (구버전 레코드는 기본 화주사=오비맥주 소속)"""
+    cur = sc.get_shipper()
+    return [r for r in _load_index() if r.get("sp", sc.DEFAULT_SHIPPER) == cur]
 
 
 @app.route("/")
@@ -92,7 +192,7 @@ def upload(ch):
         abort(404)
     cfg = sc.CHANNELS[ch]
     if request.method == "GET":
-        recent = [r for r in reversed(_load_index()) if r["ch"] == ch][:8]
+        recent = [r for r in reversed(_index_cur()) if r["ch"] == ch][:8]
         return render_template("upload.html", ch=ch, cfg=cfg, recent=recent)
 
     f = request.files.get("file")
@@ -104,30 +204,71 @@ def upload(ch):
         flash("xlsx 또는 xls 파일만 업로드할 수 있습니다.", "error")
         return redirect(url_for("upload", ch=ch))
 
-    # 채널 폴더에 영구 저장(누적)
+    # 화주사/채널 폴더에 영구 저장(누적)
+    sp = sc.get_shipper()
     now = datetime.datetime.now()
     uid = "%s_%s_%s" % (ch, now.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:4])
     fname = uid + "__" + _safe_name(f.filename)
-    os.makedirs(os.path.join(ARCHIVE_DIR, ch), exist_ok=True)
-    path = os.path.join(ARCHIVE_DIR, ch, fname)
+    os.makedirs(os.path.join(ARCHIVE_DIR, sp, ch), exist_ok=True)
+    path = os.path.join(ARCHIVE_DIR, sp, ch, fname)
     f.save(path)
 
-    # 통계 미리 계산(이력 표시용) — 실패해도 파일은 보관
-    nrec = nrows = total_qty = None
+    idx = _load_index()
+    idx.append({"id": uid, "ch": ch, "sp": sp, "orig": f.filename, "fname": fname,
+                "uploaded_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "nrec": None, "nrows": None, "total_qty": None, "sheet": None})
+    _save_index(idx)
+
+    # 시트가 2개 이상이면 어떤 시트로 라벨을 만들지 항상 사용자에게 확인
     try:
-        records = sc.parse_raw(path, ch)
-        rows, uc, up = sc.process(records, ch)
-        nrec, nrows = len(records), len(rows)
-        total_qty = sum(r["수량"] for r in rows if isinstance(r["수량"], (int, float)))
+        sheets = sc.list_sheets(path, cfg["raw"]["sheet_hint"])
+    except Exception as e:
+        flash("엑셀을 읽지 못했습니다: %s" % e, "error")
+        return redirect(url_for("upload", ch=ch))
+    if len(sheets) >= 2:
+        return redirect(url_for("sheet_select", ch=ch, token=uid))
+    _finalize_upload(uid, sheets[0]["name"] if sheets else None)
+    return redirect(url_for("result", ch=ch, token=uid))
+
+
+def _finalize_upload(uid, sheet):
+    """선택된 시트를 기록하고 이력 표시용 통계를 계산(실패해도 파일은 보관)."""
+    idx = _load_index()
+    rec = next((r for r in idx if r["id"] == uid), None)
+    if not rec:
+        return
+    rec["sheet"] = sheet
+    try:
+        records = sc.parse_raw(_rec_path(rec), rec["ch"], sheet)
+        rows, uc, up = sc.process(records, rec["ch"])
+        rec["nrec"], rec["nrows"] = len(records), len(rows)
+        rec["total_qty"] = sum(r["수량"] for r in rows if isinstance(r["수량"], (int, float)))
     except Exception:
         pass
-
-    idx = _load_index()
-    idx.append({"id": uid, "ch": ch, "orig": f.filename, "fname": fname,
-                "uploaded_at": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "nrec": nrec, "nrows": nrows, "total_qty": total_qty})
     _save_index(idx)
-    return redirect(url_for("result", ch=ch, token=uid))
+
+
+@app.route("/sheet/<ch>/<token>", methods=["GET", "POST"])
+def sheet_select(ch, token):
+    """시트가 여러 개인 엑셀: 어느 시트로 라벨을 만들지 선택."""
+    if ch not in sc.CHANNELS:
+        abort(404)
+    rec = _rec_by_id(token)
+    if not rec or rec["ch"] != ch or not os.path.exists(_rec_path(rec)):
+        flash("업로드 세션이 만료되었습니다. 다시 업로드해 주세요.", "error")
+        return redirect(url_for("upload", ch=ch))
+    cfg = sc.CHANNELS[ch]
+    sheets = sc.list_sheets(_rec_path(rec), cfg["raw"]["sheet_hint"])
+    if request.method == "POST":
+        sheet = request.form.get("sheet", "")
+        if sheet not in [s["name"] for s in sheets]:
+            flash("시트를 선택해 주세요.", "error")
+            return redirect(url_for("sheet_select", ch=ch, token=token))
+        _finalize_upload(token, sheet)
+        return redirect(url_for("result", ch=ch, token=token))
+    picked = rec.get("sheet") or sc.default_sheet(sheets)
+    return render_template("sheet_select.html", ch=ch, cfg=cfg, token=token,
+                           filename=rec["orig"], sheets=sheets, picked=picked)
 
 
 def _load_job(ch, token):
@@ -137,7 +278,7 @@ def _load_job(ch, token):
     path = _rec_path(rec)
     if not os.path.exists(path):
         return None
-    return {"channel": ch, "path": path, "filename": rec["orig"]}
+    return {"channel": ch, "path": path, "filename": rec["orig"], "sheet": rec.get("sheet")}
 
 
 @app.route("/r/<ch>/<token>")
@@ -150,8 +291,15 @@ def result(ch, token):
         return redirect(url_for("upload", ch=ch))
     cfg = sc.CHANNELS[ch]
     try:
-        records = sc.parse_raw(job["path"], ch)
+        records = sc.parse_raw(job["path"], ch, job["sheet"])
     except Exception as e:
+        # 다른 시트를 골랐어야 하는 파일일 수 있음 → 시트가 여러 개면 선택 화면으로
+        try:
+            if len(sc.list_sheets(job["path"])) >= 2:
+                flash("이 시트에서 필수 컬럼을 찾지 못했습니다: %s — 다른 시트를 선택해 보세요." % e, "error")
+                return redirect(url_for("sheet_select", ch=ch, token=token))
+        except Exception:
+            pass
         flash("RAW 파일 분석 실패: %s" % e, "error")
         return redirect(url_for("upload", ch=ch))
     rows, uc, up = sc.process(records, ch)
@@ -193,7 +341,7 @@ def print_labels(ch, token):
         flash("업로드 세션이 만료되었습니다.", "error")
         return redirect(url_for("upload", ch=ch))
     cfg = sc.CHANNELS[ch]
-    records = sc.parse_raw(job["path"], ch)
+    records = sc.parse_raw(job["path"], ch, job["sheet"])
     rows, uc, up = sc.process(records, ch)
     blocked = _block_if_missing_reps(rows, ch, token)
     if blocked:
@@ -245,12 +393,12 @@ def download(ch, token):
         flash("업로드 세션이 만료되었습니다.", "error")
         return redirect(url_for("upload", ch=ch))
     cfg = sc.CHANNELS[ch]
-    records = sc.parse_raw(job["path"], ch)
+    records = sc.parse_raw(job["path"], ch, job["sheet"])
     rows, uc, up = sc.process(records, ch)
     blocked = _block_if_missing_reps(rows, ch, token)
     if blocked:
         return blocked
-    bio = sc.generate_workbook(rows, ch, job["path"])
+    bio = sc.generate_workbook(rows, ch, job["path"], job["sheet"])
     today = datetime.datetime.now().strftime("%Y%m%d")
     fname = "%s_스마트오더_부착양식_%s.xlsx" % (cfg["name"], today)
     return send_file(bio, as_attachment=True, download_name=fname,
@@ -267,12 +415,12 @@ def labelout(ch, token):
         flash("업로드 세션이 만료되었습니다.", "error")
         return redirect(url_for("upload", ch=ch))
     cfg = sc.CHANNELS[ch]
-    records = sc.parse_raw(job["path"], ch)
+    records = sc.parse_raw(job["path"], ch, job["sheet"])
     rows, uc, up = sc.process(records, ch)
     blocked = _block_if_missing_reps(rows, ch, token)
     if blocked:
         return blocked
-    bio = sc.generate_labelout_workbook(job["path"], ch)
+    bio = sc.generate_labelout_workbook(job["path"], ch, job["sheet"])
     today = datetime.datetime.now().strftime("%Y%m%d")
     fname = "%s_스마트오더_라벨출력(폼텍)_%s.xlsx" % (cfg["name"], today)
     return send_file(bio, as_attachment=True, download_name=fname,
@@ -283,11 +431,11 @@ def labelout(ch, token):
 @app.route("/history")
 def history():
     ch = request.args.get("ch", "")
-    items = list(reversed(_load_index()))
+    items = list(reversed(_index_cur()))
     if ch in sc.CHANNELS:
         items = [r for r in items if r["ch"] == ch]
     counts = {}
-    for r in _load_index():
+    for r in _index_cur():
         counts[r["ch"]] = counts.get(r["ch"], 0) + 1
     return render_template("history.html", items=items, cfg=sc.CHANNELS,
                            channels=CH_ORDER, sel=ch, counts=counts)
@@ -334,7 +482,7 @@ def _checklist(ch, sel_date):
     수량은 process()의 row['수량'](CU=발주단위수량). 반환: (blocks, grand, dates)"""
     agg = {}          # (hub, center, prod) -> qty
     dates = set()
-    for rec in _load_index():
+    for rec in _index_cur():
         if rec["ch"] != ch:
             continue
         d = _upload_date(rec)          # 집계 기준 = 업로드 일자
@@ -345,7 +493,7 @@ def _checklist(ch, sel_date):
         if not os.path.exists(path):
             continue
         try:
-            rows, _, _ = sc.process(sc.parse_raw(path, ch), ch)
+            rows, _, _ = sc.process(sc.parse_raw(path, ch, rec.get("sheet")), ch)
         except Exception:
             continue
         for row in rows:
@@ -375,14 +523,14 @@ def _checklist(ch, sel_date):
 def _aggregate():
     """아카이브 전체 → (일자, 한익스상품명, 구분)별 채널·거점센터 수량. skipped=한익스상품명 없는 수량."""
     agg, dates, hubs, skipped = {}, set(), set(), 0
-    for rec in _load_index():
+    for rec in _index_cur():
         ch, path = rec["ch"], _rec_path(rec)
         d = _upload_date(rec)          # 집계 기준 = 업로드 일자
         dates.add(d)
         if not os.path.exists(path):
             continue
         try:
-            rows, _, _ = sc.process(sc.parse_raw(path, ch), ch)
+            rows, _, _ = sc.process(sc.parse_raw(path, ch, rec.get("sheet")), ch)
         except Exception:
             continue
         for row in rows:
@@ -680,7 +828,7 @@ def master_import_apply(which):
     # 백업 후 교체
     os.makedirs(MASTER_BAK, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open(os.path.join(MASTER_BAK, "%s.%s.json" % (fname, ts)), "w", encoding="utf-8") as bf:
+    with open(os.path.join(MASTER_BAK, "%s.%s.%s.json" % (sc.get_shipper(), fname, ts)), "w", encoding="utf-8") as bf:
         json.dump(sc.load_master(fname), bf, ensure_ascii=False, indent=1, sort_keys=True)
     diff = sc.diff_master(which, new)
     sc.save_master(fname, new)
