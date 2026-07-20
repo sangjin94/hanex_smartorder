@@ -30,8 +30,8 @@
   .grid .v.big{font-size:34px}
   .grid>div:nth-last-child(-n+2){border-bottom:0}
   @media print{
-    /* 방향(가로/세로)은 인쇄 대화상자에서 고른 대로 따른다 — portrait 강제하지 않음 */
-    @page{size:A4;margin:8mm}
+    /* 기본 방향 = 가로(A4 landscape). 인쇄 대화상자가 가로로 열린다. */
+    @page{size:A4 landscape;margin:8mm}
     body{background:#fff}
     .bar{display:none}
     .sheet{max-width:none;margin:0;padding:0}

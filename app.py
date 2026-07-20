@@ -23,7 +23,7 @@ else:
     _TPL, _STATIC = "templates", "static"
 
 from flask import (Flask, request, render_template, send_file, redirect,
-                   url_for, flash, jsonify, abort)
+                   url_for, flash, jsonify, abort, make_response)
 import smartorder_core as sc
 
 app = Flask(__name__, template_folder=_TPL, static_folder=_STATIC)
@@ -201,7 +201,12 @@ def print_labels(ch, token):
     rows = sc.sort_rows(rows)
     for r in rows:
         r["title"] = sc.make_title(cfg, r.get("구분"))
-    return render_template("print.html", ch=ch, cfg=cfg, rows=rows, token=token)
+    html = render_template("print.html", ch=ch, cfg=cfg, rows=rows, token=token)
+    # 인쇄 레이아웃(CSS)이 HTML에 인라인이라, 캐시되면 수정이 반영되지 않는다 → 항상 새로 받게 함
+    resp = make_response(html)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @app.route("/assign/<ch>/<token>", methods=["POST"])
