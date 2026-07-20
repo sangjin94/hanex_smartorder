@@ -45,49 +45,33 @@
     }
     /* 라벨 1장 = A4 1장 가득. 부착양식(엑셀)과 같은 비율로 채운다.
        (제목 30% · 개봉금지 12% · 나머지 5줄이 균등 분할) */
+    /* 높이는 가로(A4 210mm) 기준으로 고정.
+       크롬은 @page로 landscape를 지정하면 (orientation:landscape) 미디어쿼리를 landscape로
+       인식하지 않아 방향별 분기가 어긋난다 → 분기 없이 가로 기준 하나로 고정한다.
+       176mm = 210 - 여백 - '머리글과 바닥글'이 켜져 있어도 안 잘리도록 둔 여유 */
     .label{
       border:3px solid #000;margin:0;width:100%;position:relative;
+      height:176mm;
       display:flex;flex-direction:column;overflow:hidden;
       page-break-after:always;break-after:page;
     }
     .label:last-child{page-break-after:auto;break-after:auto}
     .ttl{
       flex:0 0 30%;display:flex;align-items:center;justify-content:center;
-      font-size:44pt;line-height:1.15;padding:4mm;border-bottom:3px solid #000;
+      font-size:31pt;line-height:1.15;padding:3mm;border-bottom:3px solid #000;
     }
     .warn{
       flex:0 0 12%;display:flex;align-items:center;justify-content:center;
-      font-size:26pt;padding:0;border-bottom:3px solid #000;
+      font-size:19pt;padding:0;border-bottom:3px solid #000;
     }
     /* min-height:0 / minmax(0,1fr) — 내용이 커도 배정된 높이 안으로 줄어들게(=페이지 밖으로 안 넘침) */
     .grid{flex:1 1 auto;min-height:0;grid-auto-rows:minmax(0,1fr)}
-    .grid>div{border-bottom:3px solid #000;padding:2mm 4mm;min-height:0;overflow:hidden}
+    .grid>div{border-bottom:3px solid #000;padding:1.5mm 4mm;min-height:0;overflow:hidden}
     .ttl,.warn{min-height:0;overflow:hidden}
-    .grid>div:nth-child(odd){border-right:3px solid #000;font-size:24pt}
-    .grid .v{font-size:28pt;word-break:break-word}
-    .grid .v.big{font-size:30pt}
-    .grid>div:nth-last-child(-n+2){border-bottom:0}
-  }
-  /* 높이는 '머리글과 바닥글'이 켜져 있어도 잘리지 않도록 여유를 둔다.
-     (크롬이 머리글/바닥글용으로 위아래 여백을 더 확보하기 때문) */
-  /* 세로: A4 297mm — 폭이 좁아 긴 상품명이 2~3줄로 접히므로 글자를 조금 낮춘다 */
-  @media print and (orientation:portrait){
-    .label{height:262mm}
-    .ttl{font-size:38pt}
-    .warn{font-size:23pt}
-    .grid>div:nth-child(odd){font-size:21pt}
-    .grid .v{font-size:23pt}
-    .grid .v.big{font-size:25pt}
-  }
-  /* 가로: A4 210mm — 높이가 줄어드는 만큼 글자도 함께 줄인다 */
-  @media print and (orientation:landscape){
-    .label{height:176mm}
-    .ttl{font-size:31pt;padding:3mm}
-    .warn{font-size:19pt}
-    .grid>div{padding:1.5mm 4mm}
-    .grid>div:nth-child(odd){font-size:18pt}
-    .grid .v{font-size:21pt}
+    .grid>div:nth-child(odd){border-right:3px solid #000;font-size:18pt}
+    .grid .v{font-size:21pt;word-break:break-word}
     .grid .v.big{font-size:22pt}
+    .grid>div:nth-last-child(-n+2){border-bottom:0}
   }
 </style>
 </head>
