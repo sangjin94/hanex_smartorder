@@ -143,13 +143,14 @@
           {% for name,q in prod_list %}
           <tr><td class="c">{{ loop.index }}</td><td>{{ name }}</td><td class="c">{{ q }}</td></tr>
           {% endfor %}
+          <tr class="sum"><td class="c"></td><td class="c">합계</td><td class="c">{{ prod_total }}</td></tr>
         </table>
         <table class="cv">
           <tr><th class="hy">이고센터명</th><th class="hy" style="width:76px">이고수량</th></tr>
           {% for name,q in hub_list %}
           <tr><td>{{ name }}</td><td class="c">{{ q }}</td></tr>
           {% endfor %}
-          <tr class="sum"><td class="c">합계</td><td class="c">{{ total_qty }}</td></tr>
+          <tr class="sum"><td class="c">합계</td><td class="c">{{ hub_total }}</td></tr>
         </table>
       </div>
     </div>

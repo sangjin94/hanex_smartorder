@@ -167,6 +167,8 @@ def result(ch, token):
                            unmapped_centers=uc, unmapped_products=up,
                            hubs=hubs, rep_cats=rep_cats,
                            prod_list=prod_list, hub_list=hub_list,
+                           prod_total=sum(q for _, q in prod_list),
+                           hub_total=sum(q for _, q in hub_list),
                            cover_title=sc.cover_title(cfg, rows),
                            product_cats=sc.PRODUCT_CATS)
 

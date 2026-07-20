@@ -773,12 +773,23 @@ def build_total_sheet(ws, rows, cfg):
         ws.cell(2, 2 + i, h).font = Font(name=FONT, size=11, bold=True)
     ws.cell(2, 6, "이고센터명").font = Font(name=FONT, size=11, bold=True)
     ws.cell(2, 7, "이고수량").font = Font(name=FONT, size=11, bold=True)
+    sum_fill = PatternFill("solid", fgColor="FFDBE9F7")
+
+    def _sum_row(row, col_label, col_value, total):
+        """표 하단 합계 행(연파랑 강조)."""
+        c1 = ws.cell(row, col_label, "합계"); c2 = ws.cell(row, col_value, total)
+        for c in (c1, c2):
+            c.font = Font(name=FONT, size=11, bold=True)
+            c.fill = sum_fill
+
     r = 3
     for i, (k, v) in enumerate(sorted(prod.items()), 1):   # 이름 오름차순
         ws.cell(r, 2, i); ws.cell(r, 3, k); ws.cell(r, 4, v); r += 1
+    _sum_row(r, 3, 4, sum(prod.values()))                  # 상품 수량 합계
     r = 3
     for k, v in sorted(hub.items()):
         ws.cell(r, 6, k); ws.cell(r, 7, v); r += 1
+    _sum_row(r, 6, 7, sum(hub.values()))                   # 이고수량 합계
     for col, w in {"B": 6, "C": 34, "D": 8, "E": 3, "F": 16, "G": 10}.items():
         ws.column_dimensions[col].width = w
 
