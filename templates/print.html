@@ -52,26 +52,35 @@
       flex:0 0 12%;display:flex;align-items:center;justify-content:center;
       font-size:26pt;padding:0;border-bottom:3px solid #000;
     }
-    .grid{flex:1 1 auto;grid-auto-rows:1fr}
-    .grid>div{border-bottom:3px solid #000;padding:2mm 4mm}
+    /* min-height:0 / minmax(0,1fr) — 내용이 커도 배정된 높이 안으로 줄어들게(=페이지 밖으로 안 넘침) */
+    .grid{flex:1 1 auto;min-height:0;grid-auto-rows:minmax(0,1fr)}
+    .grid>div{border-bottom:3px solid #000;padding:2mm 4mm;min-height:0;overflow:hidden}
+    .ttl,.warn{min-height:0;overflow:hidden}
     .grid>div:nth-child(odd){border-right:3px solid #000;font-size:24pt}
     .grid .v{font-size:28pt;word-break:break-word}
     .grid .v.big{font-size:30pt}
     .grid>div:nth-last-child(-n+2){border-bottom:0}
   }
-  /* 세로(A4 297mm) — 위아래 여백 8mm씩 뺀 높이를 채운다 */
+  /* 높이는 '머리글과 바닥글'이 켜져 있어도 잘리지 않도록 여유를 둔다.
+     (크롬이 머리글/바닥글용으로 위아래 여백을 더 확보하기 때문) */
+  /* 세로: A4 297mm — 폭이 좁아 긴 상품명이 2~3줄로 접히므로 글자를 조금 낮춘다 */
   @media print and (orientation:portrait){
-    .label{height:279mm}
+    .label{height:262mm}
+    .ttl{font-size:38pt}
+    .warn{font-size:23pt}
+    .grid>div:nth-child(odd){font-size:21pt}
+    .grid .v{font-size:23pt}
+    .grid .v.big{font-size:25pt}
   }
-  /* 가로(A4 210mm) — 높이가 줄어드는 만큼 글자도 함께 줄여 한 장에 딱 맞춘다 */
+  /* 가로: A4 210mm — 높이가 줄어드는 만큼 글자도 함께 줄인다 */
   @media print and (orientation:landscape){
-    .label{height:192mm}
-    .ttl{font-size:34pt;padding:3mm}
-    .warn{font-size:20pt}
+    .label{height:176mm}
+    .ttl{font-size:31pt;padding:3mm}
+    .warn{font-size:19pt}
     .grid>div{padding:1.5mm 4mm}
-    .grid>div:nth-child(odd){font-size:19pt}
-    .grid .v{font-size:22pt}
-    .grid .v.big{font-size:24pt}
+    .grid>div:nth-child(odd){font-size:18pt}
+    .grid .v{font-size:21pt}
+    .grid .v.big{font-size:22pt}
   }
 </style>
 </head>
