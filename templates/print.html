@@ -30,16 +30,16 @@
   .grid .v.big{font-size:34px}
   .grid>div:nth-last-child(-n+2){border-bottom:0}
   @media print{
-    @page{size:A4 portrait;margin:8mm}
+    /* 방향(가로/세로)은 인쇄 대화상자에서 고른 대로 따른다 — portrait 강제하지 않음 */
+    @page{size:A4;margin:8mm}
     body{background:#fff}
     .bar{display:none}
     .sheet{max-width:none;margin:0;padding:0}
     .num{display:none}
-    /* 라벨 1장 = A4 1장 가득. 부착양식(엑셀)과 같은 비율로 세로를 채운다.
+    /* 라벨 1장 = A4 1장 가득. 부착양식(엑셀)과 같은 비율로 채운다.
        (제목 30% · 개봉금지 12% · 나머지 5줄이 균등 분할) */
     .label{
       border:3px solid #000;margin:0;width:100%;
-      height:279mm;                 /* A4 297mm - 위아래 여백 8mm씩 (약간 여유) */
       display:flex;flex-direction:column;overflow:hidden;
       page-break-after:always;break-after:page;
     }
@@ -58,6 +58,20 @@
     .grid .v{font-size:28pt;word-break:break-word}
     .grid .v.big{font-size:30pt}
     .grid>div:nth-last-child(-n+2){border-bottom:0}
+  }
+  /* 세로(A4 297mm) — 위아래 여백 8mm씩 뺀 높이를 채운다 */
+  @media print and (orientation:portrait){
+    .label{height:279mm}
+  }
+  /* 가로(A4 210mm) — 높이가 줄어드는 만큼 글자도 함께 줄여 한 장에 딱 맞춘다 */
+  @media print and (orientation:landscape){
+    .label{height:192mm}
+    .ttl{font-size:34pt;padding:3mm}
+    .warn{font-size:20pt}
+    .grid>div{padding:1.5mm 4mm}
+    .grid>div:nth-child(odd){font-size:19pt}
+    .grid .v{font-size:22pt}
+    .grid .v.big{font-size:24pt}
   }
 </style>
 </head>
