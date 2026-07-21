@@ -38,8 +38,30 @@
         </form>
         {% if sid == cur_shipper %}<span class="pill" style="background:#dbeafe;color:#1d4ed8;margin-top:4px;display:inline-block">현재 선택됨</span>{% endif %}
       </td>
-      <td class="muted">
-        상품 {{ stats[sid].products }}개 · 센터 {{ stats[sid].centers }}개 · 업로드 {{ stats[sid].uploads }}건
+      <td>
+        <form method="post" action="{{ url_for('shippers_save') }}" class="row" style="gap:6px;flex-wrap:wrap">
+          <input type="hidden" name="action" value="cats">
+          <input type="hidden" name="sid" value="{{ sid }}">
+          <label style="display:flex;flex-direction:column;gap:2px">
+            <span class="muted" style="font-size:11px">구분 (라벨 제목에 표시, 쉼표로 구분)</span>
+            <input type="text" name="cats" value="{{ sp.cats|join(', ') if sp.cats else '' }}"
+                   placeholder="예: 대월, 프리미엄" style="width:220px">
+          </label>
+          <button class="btn gray" type="submit" style="padding:7px 12px;align-self:flex-end">구분저장</button>
+        </form>
+        <div class="row" style="margin-top:6px;gap:10px">
+          <form method="post" action="{{ url_for('shippers_save') }}">
+            <input type="hidden" name="action" value="toggle_skip_pm">
+            <input type="hidden" name="sid" value="{{ sid }}">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" name="skip_pm" {{ 'checked' if sp.skip_pm }} onchange="this.form.submit()">
+              <span class="muted" style="font-size:12px">상품마스터 생략 (RAW 상품명 그대로 사용)</span>
+            </label>
+          </form>
+        </div>
+        <div class="muted" style="margin-top:4px">
+          {% if sp.skip_pm %}센터 {{ stats[sid].centers }}개{% else %}상품 {{ stats[sid].products }}개 · 센터 {{ stats[sid].centers }}개{% endif %} · 업로드 {{ stats[sid].uploads }}건
+        </div>
       </td>
       <td>
         <div class="row" style="gap:6px">

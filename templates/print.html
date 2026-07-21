@@ -91,13 +91,36 @@
     <div class="warn">※수령자 외 절대 개봉금지※</div>
     <div class="grid">
       <div>이고센터</div><div class="v">{{ r.거점센터 }}</div>
-      <div>{{ cfg.center_label }}</div><div class="v">{{ r.센터 }}</div>
+      <div>{{ cfg.center_label }}</div><div class="v"{% if r._center_color %} style="background:{{ r._center_color }};-webkit-print-color-adjust:exact;print-color-adjust:exact"{% endif %}>{{ r.센터 }}</div>
       <div>점포명</div><div class="v big">{{ r.점포명 }}</div>
-      <div>상품</div><div class="v big">{{ r.상품명 }}</div>
+      <div>상품</div><div class="v big prod">{{ r.상품명 }}</div>
       <div>수량</div><div class="v big">{{ r.수량 }}</div>
     </div>
   </div>
   {% endfor %}
 </div>
+<script>
+function fitProd(){
+  var span = document.createElement('span');
+  span.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-weight:800;font-family:"맑은 고딕",sans-serif';
+  document.body.appendChild(span);
+  document.querySelectorAll('.prod').forEach(function(el){
+    var maxW = el.clientWidth - 20;
+    var fs = parseFloat(getComputedStyle(el).fontSize);
+    span.style.fontSize = fs + 'px';
+    span.textContent = el.textContent;
+    while(span.offsetWidth > maxW && fs > 14){
+      fs -= 1;
+      span.style.fontSize = fs + 'px';
+    }
+    if(fs < parseFloat(getComputedStyle(el).fontSize)){
+      el.style.fontSize = fs + 'px';
+    }
+  });
+  span.remove();
+}
+if(document.readyState === 'complete') fitProd();
+else window.addEventListener('load', fitProd);
+</script>
 </body>
 </html>

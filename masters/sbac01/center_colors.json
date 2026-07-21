@@ -1,0 +1,18 @@
+{
+ "cu": [
+  {"text": "로지스광주", "color": "#B4BAC3"},
+  {"text": "제주센터", "color": "#C5DEB5"}
+ ],
+ "gs": [
+  {"text": "고촌공산", "color": "#C5DEB5"},
+  {"text": "김포센터", "color": "#ADACAC"},
+  {"text": "고촌2", "color": "#0070C0"},
+  {"text": "김포2", "color": "#B17ED8"},
+  {"text": "제주센터", "color": "#92D050"},
+  {"text": "강릉공산", "color": "#BDD6EE"},
+  {"text": "송파센터", "color": "#FFC000"},
+  {"text": "송파2센터", "color": "#FFFF00"}
+ ],
+ "k7": [],
+ "e24": []
+}

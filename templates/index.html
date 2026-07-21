@@ -5,7 +5,7 @@
   <div class="sub">RAW 파일을 업로드하면 <b>센터명 → 이고센터</b>, <b>상품코드 → 한익스상품명</b> 매핑으로 부착양식(A4) 라벨을 생성합니다.</div>
 
   <div class="grid">
-    {% set colors = {'cu':'#7c3aed','gs':'#0891b2','e24':'#ea580c'} %}
+    {% set colors = {'cu':'#7c3aed','gs':'#0891b2','k7':'#2563eb','e24':'#ea580c'} %}
     {% for ch in channels %}
     <a class="chcard" style="background:linear-gradient(135deg,{{colors[ch]}},{{colors[ch]}}cc)" href="{{ url_for('upload', ch=ch) }}">
       <div class="big">{{ cfg[ch].name }}</div>

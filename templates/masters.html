@@ -7,9 +7,16 @@
     <b>🏢 {{ cur_shipper_name }}</b>의 마스터입니다 (화주사별로 분리 — 헤더에서 화주사를 바꾸면 그 화주사 마스터가 열립니다).
     센터는 <b>센터명</b>으로, 상품은 <b>상품코드</b>로 매핑하며, 센터마스터는 전 채널(CU·GS·이마트24) 공통입니다.
   </div>
+  {% if skip_pm %}
+  <div class="okbox" style="margin-bottom:12px">
+    <b>ℹ️ 상품마스터 생략</b> — 이 화주사는 RAW 상품명을 그대로 라벨·표지에 사용합니다.
+    <span class="muted">(화주사 설정에서 변경 가능)</span>
+  </div>
+  {% endif %}
   <div class="grid">
     {% set colors = {'center':'#7c3aed','product':'#1d4ed8'} %}
     {% for key,d in defs.items() %}
+    {% if key != 'product' or not skip_pm %}
     <a class="chcard" style="background:linear-gradient(135deg,{{colors[key]}},{{colors[key]}}cc)"
        href="{{ url_for('master_edit', which=key) }}">
       <div style="font-size:15px;font-weight:700;opacity:.95">{{ d.title }}</div>
@@ -17,7 +24,65 @@
       <div class="meta">등록 항목</div>
       <div class="go">→</div>
     </a>
+    {% endif %}
     {% endfor %}
   </div>
 </div>
+
+<div class="card" style="margin-top:16px">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">🎨 채널센터 색상 규칙</h2>
+    <span class="muted">센터명에 검색어가 포함되면 배경색 적용 (라벨 인쇄·엑셀 모두)</span>
+  </div>
+
+  {% for ch in channels %}
+  {% set ch_rules = center_colors.get(ch, []) %}
+  <div style="margin-top:16px;padding:14px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <b style="font-size:15px">{{ channel_cfg[ch].name }} ({{ channel_cfg[ch].center_label }})</b>
+      <div class="row" style="gap:6px">
+        <form method="post" action="{{ url_for('center_colors_save') }}" style="display:inline">
+          <input type="hidden" name="action" value="clear">
+          <input type="hidden" name="ch" value="{{ ch }}">
+          <button class="btn gray" type="submit" style="padding:4px 12px;font-size:13px">초기화</button>
+        </form>
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('center_colors_save') }}">
+      <input type="hidden" name="action" value="save_rules">
+      <input type="hidden" name="ch" value="{{ ch }}">
+      <div id="rules_{{ ch }}" style="display:flex;flex-direction:column;gap:6px">
+        {% for rule in ch_rules %}
+        <div class="rule-row" style="display:flex;align-items:center;gap:8px">
+          <input type="color" name="rule_color" value="{{ rule.color }}"
+                 style="width:32px;height:28px;border:1px solid #cbd5e1;border-radius:6px;padding:1px;cursor:pointer">
+          <input type="text" name="rule_text" value="{{ rule.text }}" placeholder="검색어 (부분일치)"
+                 style="width:180px;padding:5px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px">
+          <span class="muted" style="font-size:12px">센터명에 <b>{{ rule.text }}</b> 포함 시 적용</span>
+          <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#dc2626">✕</button>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px">
+        <button type="button" onclick="addRule('{{ ch }}')" class="btn gray" style="padding:5px 14px;font-size:13px">+ 규칙 추가</button>
+        <button type="submit" class="btn" style="padding:5px 14px;font-size:13px">저장</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+function addRule(ch){
+  var container = document.getElementById('rules_' + ch);
+  var div = document.createElement('div');
+  div.className = 'rule-row';
+  div.style.cssText = 'display:flex;align-items:center;gap:8px';
+  div.innerHTML =
+    '<input type="color" name="rule_color" value="#fde68a" style="width:32px;height:28px;border:1px solid #cbd5e1;border-radius:6px;padding:1px;cursor:pointer">' +
+    '<input type="text" name="rule_text" value="" placeholder="검색어 (부분일치)" style="width:180px;padding:5px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px">' +
+    '<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#dc2626">✕</button>';
+  container.appendChild(div);
+}
+</script>
 {% endblock %}

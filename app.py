@@ -43,7 +43,7 @@ app.wsgi_app = PrefixMiddleware(app.wsgi_app)
 
 sc.ensure_masters_seeded()
 
-CH_ORDER = ["cu", "gs", "e24"]
+CH_ORDER = ["cu", "gs", "k7", "e24"]
 
 
 # ---------------- 화주사(shipper): 마스터·이력·집계 전부 화주사별 분리 ----------------
@@ -108,7 +108,7 @@ def shippers_save():
             flash("이미 있는 화주사입니다: %s" % name, "error")
         else:
             sid = "s" + uuid.uuid4().hex[:6]
-            shippers[sid] = {"name": name}
+            shippers[sid] = {"name": name, "cats": [name]}
             sc.save_shippers(shippers)
             flash("화주사 추가: %s (마스터는 비어 있는 상태로 시작 — 마스터관리에서 등록하거나 엑셀 업로드)" % name, "ok")
     elif act == "rename":
@@ -119,6 +119,24 @@ def shippers_save():
             shippers[sid]["name"] = name
             sc.save_shippers(shippers)
             flash("이름 변경: %s → %s" % (old, name), "ok")
+    elif act == "cats":
+        sid = request.form.get("sid", "")
+        cats_raw = request.form.get("cats", "").strip()
+        if sid in shippers:
+            cats = [c.strip() for c in cats_raw.replace("，", ",").split(",") if c.strip()]
+            if not cats:
+                flash("구분을 최소 1개 입력해 주세요.", "error")
+            else:
+                shippers[sid]["cats"] = cats
+                sc.save_shippers(shippers)
+                flash("구분 저장: %s → %s" % (shippers[sid]["name"], ", ".join(cats)), "ok")
+    elif act == "toggle_skip_pm":
+        sid = request.form.get("sid", "")
+        if sid in shippers:
+            shippers[sid]["skip_pm"] = "skip_pm" in request.form
+            sc.save_shippers(shippers)
+            st = "생략" if shippers[sid]["skip_pm"] else "사용"
+            flash("%s: 상품마스터 %s" % (shippers[sid]["name"], st), "ok")
     elif act == "delete":
         sid = request.form.get("sid", "")
         if sid == sc.DEFAULT_SHIPPER:
@@ -318,7 +336,7 @@ def result(ch, token):
                            prod_total=sum(q for _, q in prod_list),
                            hub_total=sum(q for _, q in hub_list),
                            cover_title=sc.cover_title(cfg, rows),
-                           product_cats=sc.PRODUCT_CATS)
+                           product_cats=sc.get_cats())
 
 
 def _block_if_missing_reps(rows, ch, token):
@@ -347,8 +365,10 @@ def print_labels(ch, token):
     if blocked:
         return blocked
     rows = sc.sort_rows(rows)
+    center_rules = sc.load_center_colors(ch)
     for r in rows:
         r["title"] = sc.make_title(cfg, r.get("구분"))
+        r["_center_color"] = sc.match_center_color(r["센터"], ch, center_rules)
     html = render_template("print.html", ch=ch, cfg=cfg, rows=rows, token=token)
     # 인쇄 레이아웃(CSS)이 HTML에 인라인이라, 캐시되면 수정이 반영되지 않는다 → 항상 새로 받게 함
     resp = make_response(html)
@@ -376,12 +396,38 @@ def assign(ch, token):
         if key.startswith("prod::"):
             code = key[len("prod::"):]
             rep = request.form.get(key, "").strip()
-            cat = request.form.get("pcat::" + code, sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+            cat = request.form.get("pcat::" + code, sc.get_default_cat()).strip() or sc.get_default_cat()
             if rep:
                 pm[code] = {"rep": rep, "cat": cat}
     sc.save_master("product.json", pm)
     flash("매핑을 저장했습니다.", "ok")
     return redirect(url_for("result", ch=ch, token=token))
+
+
+@app.route("/center_colors", methods=["POST"])
+def center_colors_save():
+    """채널센터 containsText 색상 규칙 저장."""
+    act = request.form.get("action")
+    ch = request.form.get("ch", "")
+    all_rules = sc.load_center_colors()
+
+    if act == "save_rules":
+        texts = request.form.getlist("rule_text")
+        colors = request.form.getlist("rule_color")
+        rules = []
+        for t, c in zip(texts, colors):
+            t = t.strip()
+            if t and c:
+                rules.append({"text": t, "color": c.strip()})
+        all_rules[ch] = rules
+        sc.save_center_colors(all_rules)
+        flash("채널센터 색상 규칙 저장 완료 (%d개)" % len(rules), "ok")
+    elif act == "clear":
+        all_rules[ch] = []
+        sc.save_center_colors(all_rules)
+        flash("채널센터 색상 규칙 초기화 완료", "ok")
+
+    return redirect(url_for("masters"))
 
 
 @app.route("/download/<ch>/<token>")
@@ -564,7 +610,8 @@ def _report_table(view, sel_date):
                                          "total": sum(src.values())})
     out, grand, grand_total = [], {k: 0 for k in colkeys}, 0
     for d in sorted(groups, reverse=True):
-        rows = sorted(groups[d], key=lambda r: (sc.PRODUCT_CATS.index(r["cat"]) if r["cat"] in sc.PRODUCT_CATS else 9, r["rep"]))
+        pcats = sc.get_cats()
+        rows = sorted(groups[d], key=lambda r: (pcats.index(r["cat"]) if r["cat"] in pcats else 9, r["rep"]))
         sub = {k: sum(r["cols"][k] for r in rows) for k in colkeys}
         sub_total = sum(r["total"] for r in rows)
         for k in colkeys:
@@ -668,7 +715,11 @@ MASTER_DEFS = {
 @app.route("/masters")
 def masters():
     counts = {k: len(sc.load_master(v["file"])) for k, v in MASTER_DEFS.items()}
-    return render_template("masters.html", defs=MASTER_DEFS, counts=counts)
+    center_colors = sc.load_center_colors()
+    return render_template("masters.html", defs=MASTER_DEFS, counts=counts,
+                           skip_pm=sc.skip_product_master(),
+                           center_colors=center_colors,
+                           channels=CH_ORDER, channel_cfg=sc.CHANNELS)
 
 
 @app.route("/masters/<which>", methods=["GET"])
@@ -699,7 +750,7 @@ def master_edit(which):
     hubs = sc.all_hubs()
     return render_template("master_edit.html", which=which, d=d, items=items, reps=reps,
                            q=q, total=len(data), found=found, page=page, pages=pages,
-                           hubs=hubs, product_cats=sc.PRODUCT_CATS)
+                           hubs=hubs, product_cats=sc.get_cats())
 
 
 @app.route("/masters/<which>/save", methods=["POST"])
@@ -714,7 +765,7 @@ def master_save(which):
     def save_product(old_rep):
         """상품 1건(이름·구분·코드들)을 통째로 저장. old_rep이 있으면 그 상품을 교체."""
         rep = request.form.get("value", "").strip()
-        cat = request.form.get("cat", sc.DEFAULT_CAT).strip() or sc.DEFAULT_CAT
+        cat = request.form.get("cat", sc.get_default_cat()).strip() or sc.get_default_cat()
         codes = sc.split_codes(request.form.get("codes", ""))
         if not rep or not codes:
             flash("한익스상품명과 상품코드를 모두 입력해 주세요.", "error")

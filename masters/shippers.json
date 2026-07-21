@@ -1,8 +1,37 @@
 {
  "ob": {
+  "cats": [
+   "대월",
+   "프리미엄"
+  ],
   "name": "오비맥주"
  },
  "s89a685": {
-  "name": "하이트진로"
+  "cats": [
+   "하이트진로"
+  ],
+  "name": "하이트진로",
+  "skip_pm": true
+ },
+ "sbac01": {
+  "cats": [
+   "바카디"
+  ],
+  "name": "바카디",
+  "skip_pm": true
+ },
+ "sdnp01": {
+  "cats": [
+   "디앤피"
+  ],
+  "name": "디앤피 스피리츠",
+  "skip_pm": true
+ },
+ "swgs01": {
+  "cats": [
+   "윌리엄"
+  ],
+  "name": "윌리엄그랜트앤선즈",
+  "skip_pm": true
  }
 }

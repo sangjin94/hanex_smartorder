@@ -146,6 +146,29 @@ CHANNELS = {
             "date":        ["예약일자", "수령일자"],
         },
     },
+    "k7": {
+        "name": "코리아세븐",
+        "tag": "K7",
+        "title_tpl": "{jm}\n(코리아세븐 스마트오더)",
+        "center_label": "K7센터",
+        "hub_col": "배송센터",
+        "label_product": "raw",
+        "col_width": {"A": 39.0, "B": 99.9, "C": 41.7, "D": 8.7},
+        "row_h": 62.4,
+        "lead_spacer": True,
+        "raw": {
+            "sheet_hint": ["lowdata", "K7", "Sheet"],
+            "header_scan_rows": 2,
+            "center_code": [],
+            "center_name": ["입고처"],
+            "store_code": [],
+            "store_name": ["입고처"],
+            "prod_code": ["상품 코드", "상품코드"],
+            "prod_name": ["상품명"],
+            "qty": ["수량"],
+            "date": ["입고일자", "발주일자"],
+        },
+    },
     "e24": {
         "name": "이마트24",
         "tag": "E-24",
@@ -171,35 +194,72 @@ CHANNELS = {
     },
 }
 
-# 상품 구분(직매장 종류)
-PRODUCT_CATS = ["대월", "프리미엄"]
-DEFAULT_CAT = "대월"
+# 상품 구분(직매장 종류) — 화주사별로 다름. 아래 함수로 동적 조회.
+_FALLBACK_CATS = ["대월", "프리미엄"]
+PRODUCT_CATS = _FALLBACK_CATS          # 하위 호환(템플릿 등에서 직접 참조하는 곳 대비)
+DEFAULT_CAT = _FALLBACK_CATS[0]
 TOTAL_TITLE_TPL = "{jm}({tag})스마트오더 TOTAL 수량"
 
 
+def get_cats(sid=None):
+    """현재(또는 지정) 화주사의 상품 구분 목록."""
+    s = load_shippers().get(sid or _cur_shipper, {})
+    cats = s.get("cats")
+    if cats and isinstance(cats, list):
+        return cats
+    return list(_FALLBACK_CATS)
+
+
+def get_default_cat(sid=None):
+    cats = get_cats(sid)
+    return cats[0] if cats else _FALLBACK_CATS[0]
+
+
+def skip_product_master(sid=None):
+    """상품마스터 스킵 여부. True이면 RAW 상품명을 표지/라벨에 그대로 사용."""
+    s = load_shippers().get(sid or _cur_shipper, {})
+    return bool(s.get("skip_pm"))
+
+
 def product_rep_cat(pm, code):
-    """상품마스터에서 (대표=한익스상품명, 구분) 반환. 값이 문자열이면 레거시(구분=대월).
+    """상품마스터에서 (대표=한익스상품명, 구분) 반환. 값이 문자열이면 레거시(구분=첫 번째 구분).
     미등록이면 (None, None)."""
     v = pm.get(code)
     if v is None:
         return None, None
+    dc = get_default_cat()
     if isinstance(v, dict):
-        return v.get("rep", ""), v.get("cat", DEFAULT_CAT)
-    return v, DEFAULT_CAT
+        return v.get("rep", ""), v.get("cat", dc)
+    return v, dc
 
 
 def make_title(cfg, cat):
     """상품 구분에 따른 라벨 제목. 대월→대월직매장, 프리미엄→프리미엄직매장.
-    {shipper}가 있는 템플릿(E24)은 현재 화주사명으로 채운다."""
-    jm = (cat or DEFAULT_CAT) + "직매장"
-    return cfg["title_tpl"].format(jm=jm, shipper=shipper_name())
+    {shipper}가 있는 템플릿(E24)은 현재 화주사명으로 채운다.
+    skip_pm 화주사는 '직매장' 없이 화주사명만."""
+    sname = shipper_name()
+    if skip_product_master():
+        tpl = cfg["title_tpl"]
+        if "{shipper}" in tpl:
+            jm = ""
+        else:
+            jm = sname
+        raw = tpl.format(jm=jm, shipper=sname)
+        return "\n".join(line.strip() for line in raw.split("\n"))
+    jm = (cat or get_default_cat()) + "직매장"
+    return cfg["title_tpl"].format(jm=jm, shipper=sname)
 
 
 def cover_title(cfg, rows):
     """표지 제목. 포함된 구분이 하나면 그 구분, 여러 개면 '대월·프리미엄'."""
-    cats = [r.get("구분") or DEFAULT_CAT for r in rows]
-    uniq = sorted(set(cats), key=lambda c: (PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9))
-    jm = ("·".join(uniq) if uniq else DEFAULT_CAT) + "직매장"
+    if skip_product_master():
+        jm = shipper_name()
+    else:
+        dc = get_default_cat()
+        pcats = get_cats()
+        cats = [r.get("구분") or dc for r in rows]
+        uniq = sorted(set(cats), key=lambda c: (pcats.index(c) if c in pcats else 9))
+        jm = ("·".join(uniq) if uniq else dc) + "직매장"
     return TOTAL_TITLE_TPL.format(jm=jm, tag=cfg["tag"])
 
 
@@ -247,6 +307,41 @@ def all_hubs():
     return sorted({h for h in load_master(CENTER_MASTER).values() if h})
 
 
+HUB_COLORS_FILE = "hub_colors.json"
+CENTER_COLORS_FILE = "center_colors.json"
+
+def load_hub_colors():
+    return load_master(HUB_COLORS_FILE)
+
+def save_hub_colors(data):
+    save_master(HUB_COLORS_FILE, data)
+
+def load_center_colors(channel=None):
+    """채널센터 색상 규칙 로드. 채널별 [{text, color}] — containsText 매칭.
+    channel 지정 시 해당 채널 규칙만, None이면 전체 dict 반환."""
+    data = load_master(CENTER_COLORS_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    if channel:
+        rules = data.get(channel, [])
+        return rules if isinstance(rules, list) else []
+    return data
+
+def save_center_colors(data):
+    save_master(CENTER_COLORS_FILE, data)
+
+def match_center_color(center_name, channel, rules=None):
+    """채널센터명에 부분일치하는 첫 번째 규칙의 색상 반환."""
+    if rules is None:
+        rules = load_center_colors(channel)
+    if not center_name:
+        return None
+    for r in rules:
+        if r.get("text") and r["text"] in center_name:
+            return r.get("color")
+    return None
+
+
 def all_reps():
     """등록된 한익스상품명 → 구분. 같은 상품이라도 채널마다 코드가 달라, 코드를 기존 상품에 붙일 때 쓴다."""
     pm = load_master("product.json")
@@ -254,7 +349,7 @@ def all_reps():
     for code in pm:
         rep, cat = product_rep_cat(pm, code)
         if rep:
-            reps.setdefault(rep, cat or DEFAULT_CAT)
+            reps.setdefault(rep, cat or get_default_cat())
     return dict(sorted(reps.items()))
 
 # ----------------------------------------------------------------------------
@@ -293,7 +388,7 @@ def product_groups():
     groups = {}
     for code in sorted(pm):
         rep, cat = product_rep_cat(pm, code)
-        g = groups.setdefault(rep or "", {"rep": rep or "", "cat": cat or DEFAULT_CAT, "codes": []})
+        g = groups.setdefault(rep or "", {"rep": rep or "", "cat": cat or get_default_cat(), "codes": []})
         g["codes"].append(code)
     return sorted(groups.values(), key=lambda g: g["rep"])
 
@@ -323,7 +418,7 @@ def build_master_xlsx(kind):
     for row in rows:
         ws.append(row)
     last = max(ws.max_row, 2) + 200   # 아래로 추가 입력할 여유 행까지 드롭다운 적용
-    opts = all_hubs() if kind == "center" else PRODUCT_CATS
+    opts = all_hubs() if kind == "center" else get_cats()
     col = "B"   # center: 이고센터, product: 구분 — 둘 다 두 번째 열
     if opts:
         dv = DataValidation(type="list", formula1='"%s"' % ",".join(opts), allow_blank=True)
@@ -371,22 +466,23 @@ def parse_master_xlsx(path, kind):
             codes = split_codes(codes_txt)
             if not rep or not codes:
                 errors.append("%d행: 한익스상품명과 상품코드를 모두 채워주세요." % i); continue
-            if cat and cat not in PRODUCT_CATS:
+            pcats = get_cats()
+            if cat and cat not in pcats:
                 errors.append("%d행: 구분은 %s 중 하나여야 합니다. (받은 값: %s)"
-                              % (i, "/".join(PRODUCT_CATS), cat)); continue
+                              % (i, "/".join(pcats), cat)); continue
             dup = [c for c in codes if c in data]
             if dup:
                 errors.append("%d행: 상품코드 %s 가 다른 행에도 있습니다. 코드는 상품 하나에만 넣어주세요."
                               % (i, ", ".join(dup))); continue
             for code in codes:
-                data[code] = {"rep": rep, "cat": cat or DEFAULT_CAT}
+                data[code] = {"rep": rep, "cat": cat or get_default_cat()}
     return data, errors
 
 
 def _master_val(kind, data, key):
     if kind == "product":
         rep, cat = product_rep_cat(data, key)
-        return "%s (%s)" % (rep or "", cat or DEFAULT_CAT)
+        return "%s (%s)" % (rep or "", cat or get_default_cat())
     return data.get(key, "")
 
 
@@ -584,29 +680,34 @@ def process(records, channel):
     """
     cfg = CHANNELS[channel]
     center_master = load_master(CENTER_MASTER)
-    product_master = load_master("product.json")
-    # 보조: 화주상품명 -> {rep,cat} (코드 미등록 시 이름 폴백). 정규화 키로 인덱싱.
-    product_names = load_master("product_names.json")
+    skip_pm = skip_product_master()
+    product_master = {} if skip_pm else load_master("product.json")
+    product_names = {} if skip_pm else load_master("product_names.json")
     pn_idx = {norm(k): v for k, v in product_names.items()}
 
     rows = []
     unmapped_centers = {}   # 센터명 -> 참고표시(센터코드)
     unmapped_products = {}  # code -> name
+    dc = get_default_cat()
     for rec in records:
         ckeyval = rec["center_name"]   # 센터 매핑 키 = 센터명(전 채널 공통)
         hub = center_master.get(ckeyval, "")
         if not hub and ckeyval:
             unmapped_centers[ckeyval] = rec["center_code"]
-        # 1) 코드 우선 → 2) 화주상품명 폴백
-        rep, cat = product_rep_cat(product_master, rec["prod_code"])
-        if rep is None:
-            v = pn_idx.get(norm(rec["prod_name"]))
-            if v:
-                rep, cat = v.get("rep", ""), v.get("cat", DEFAULT_CAT)
-        if not rep and rec["prod_code"]:
-            unmapped_products[rec["prod_code"]] = rec["prod_name"]
-        cat = cat or DEFAULT_CAT
-        # 부착양식 라벨 = 화주상품명(원본 제품명), 표지/집계 = 대표(한익스상품명)
+
+        if skip_pm:
+            rep = rec["prod_name"] or ""
+            cat = dc
+        else:
+            rep, cat = product_rep_cat(product_master, rec["prod_code"])
+            if rep is None:
+                v = pn_idx.get(norm(rec["prod_name"]))
+                if v:
+                    rep, cat = v.get("rep", ""), v.get("cat", dc)
+            if not rep and rec["prod_code"]:
+                unmapped_products[rec["prod_code"]] = rec["prod_name"]
+            cat = cat or dc
+
         label_prod = rec["prod_name"] if cfg["label_product"] == "raw" else (rep or rec["prod_name"])
         rows.append({
             "센터": rec["center_name"],
@@ -614,11 +715,10 @@ def process(records, channel):
             "점포코드": rec["store_code"],
             "점포명": rec["store_name"],
             "거점센터": hub,
-            "상품명": label_prod,          # 라벨 표시용 = 화주상품명
+            "상품명": label_prod,
             "수량": rec["qty"],
-            # 표지 표시용 = 한익스상품명(대표). 마스터에 없으면 빈값 — 화주상품명으로 폴백하지 않는다.
             "대표": rep or "",
-            "구분": cat,                       # 대월 / 프리미엄 (라벨 제목 분기)
+            "구분": cat,
             "_ckey": ckeyval,
             "_pcode": rec["prod_code"],
         })
@@ -635,11 +735,12 @@ def missing_reps(rows):
 
 
 def sort_rows(rows):
-    """구분(대월/프리미엄) → 상품명(화주·라벨표시) → 이고센터 → 채널센터 → 점포명 순 정렬."""
+    """대표(한익스상품명) → 거점센터(배송센터) → 채널센터 → 점포명 순 정렬."""
+    pcats = get_cats()
     def catkey(c):
-        return PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9
-    return sorted(rows, key=lambda x: (catkey(x.get("구분") or DEFAULT_CAT),
-                                       x["상품명"] or "",
+        return pcats.index(c) if c in pcats else 9
+    return sorted(rows, key=lambda x: (catkey(x.get("구분") or get_default_cat()),
+                                       x["대표"] or x["상품명"] or "",
                                        x["거점센터"] or "zzz",
                                        x["센터"] or "",
                                        x["점포명"] or ""))
@@ -702,17 +803,18 @@ def labelout_grid(path, channel, sheet=None):
         if not rep:
             v = pn_idx.get(norm(pname))
             if v:
-                rep, cat = v.get("rep", ""), v.get("cat", DEFAULT_CAT)
+                rep, cat = v.get("rep", ""), v.get("cat", get_default_cat())
         cells = list(r) + [None] * (ncol - len(r))
         cells[hub_i] = hub
         cells[rep_i] = rep or ""
-        out.append({"cells": cells[:ncol], "_cat": cat or DEFAULT_CAT,
-                    "_prod": pname, "_hub": hub, "_center": cname,
+        out.append({"cells": cells[:ncol], "_cat": cat or get_default_cat(),
+                    "_rep": rep or pname, "_prod": pname, "_hub": hub, "_center": cname,
                     "_store": g(r, "store_name") or cname})
 
+    pcats = get_cats()
     def catkey(c):
-        return PRODUCT_CATS.index(c) if c in PRODUCT_CATS else 9
-    out.sort(key=lambda x: (catkey(x["_cat"]), x["_prod"] or "",
+        return pcats.index(c) if c in pcats else 9
+    out.sort(key=lambda x: (catkey(x["_cat"]), x["_rep"] or x["_prod"] or "",
                             x["_hub"] or "zzz", x["_center"] or "", x["_store"] or ""))
     return headers, [x["cells"] for x in out]
 
@@ -809,8 +911,19 @@ def _style_cell(cell, value, size, bold=True, border=True, fill=None, align=AL_C
     if fill:
         cell.fill = fill
 
-def build_label_sheet(ws, rows, cfg):
-    # 열 너비
+def _hex_to_fill(hexcolor):
+    """'#rrggbb' → PatternFill, 또는 None."""
+    if not hexcolor or hexcolor == "#ffffff":
+        return None
+    c = hexcolor.lstrip("#").upper()
+    if len(c) != 6:
+        return None
+    return PatternFill("solid", fgColor="FF" + c)
+
+
+def build_label_sheet(ws, rows, cfg, channel=None, center_color_rules=None):
+    if center_color_rules is None:
+        center_color_rules = load_center_colors(channel) if channel else []
     for col, w in cfg["col_width"].items():
         ws.column_dimensions[col].width = w
     r = 1
@@ -820,9 +933,8 @@ def build_label_sheet(ws, rows, cfg):
         r += 1
     rh = cfg["row_h"]
     wa, wbv = cfg["col_width"]["A"], cfg["col_width"]["B"]
-    wtitle = wa + wbv          # 제목은 A:B 병합
+    wtitle = wa + wbv
     for n, row in enumerate(rows, start=1):
-        # 1) 제목 (상품 구분에 따라 대월/프리미엄 직매장)
         title = make_title(cfg, row.get("구분"))
         tsize = min(fit_font_size(line, wtitle, 62, min_size=40) for line in title.split("\n"))
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
@@ -830,28 +942,25 @@ def build_label_sheet(ws, rows, cfg):
         _cnum_cell(ws.cell(r, 3), n)
         ws.row_dimensions[r].height = 169.95
         r += 1
-        # 2) 개봉금지
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
         _style_cell(ws.cell(r, 1), "※수령자 외 절대 개봉금지※", 40, fill=FILL_WARN, align=AL_C)
         _cnum_cell(ws.cell(r, 3))
         ws.row_dimensions[r].height = 63.6
         r += 1
-        # 3~7) 라벨 항목
+        center_fill = _hex_to_fill(match_center_color(row["센터"], channel, center_color_rules))
         items = [
-            ("이고센터", row["거점센터"], 42),
-            (cfg["center_label"], row["센터"], 42),
-            (" 점포명", row["점포명"], 48),
-            (" 상품 ", row["상품명"], 48),
-            (" 수량", row["수량"], 48),
+            ("이고센터", row["거점센터"], 42, None),
+            (cfg["center_label"], row["센터"], 42, center_fill),
+            (" 점포명", row["점포명"], 48, None),
+            (" 상품 ", row["상품명"], 48, None),
+            (" 수량", row["수량"], 48, None),
         ]
-        for label, value, bsize in items:
-            # 긴 상품명·센터명이 열 밖으로 잘리지 않도록 글자크기를 폭에 맞춰 축소
+        for label, value, bsize, fill in items:
             _style_cell(ws.cell(r, 1), label, fit_font_size(label, wa, 42), align=AL_C_FIT)
-            _style_cell(ws.cell(r, 2), value, fit_font_size(value, wbv, bsize), align=AL_C_FIT)
+            _style_cell(ws.cell(r, 2), value, fit_font_size(value, wbv, bsize), align=AL_C_FIT, fill=fill)
             _cnum_cell(ws.cell(r, 3))
             ws.row_dimensions[r].height = rh
             r += 1
-        # 8) 여백
         cc = ws.cell(r, 3); cc.font = Font(name=FONT, size=48, bold=True); cc.fill = FILL_YELLOW; cc.alignment = AL_V
         ws.row_dimensions[r].height = 26.0
         r += 1
@@ -937,7 +1046,7 @@ def generate_workbook(rows, channel, path=None, sheet=None):
         ws_total.title = "TOTAL(표지)"
     build_total_sheet(ws_total, rows, cfg)
     ws_label = wb.create_sheet("부착양식(A4출력)")
-    build_label_sheet(ws_label, rows, cfg)
+    build_label_sheet(ws_label, rows, cfg, channel=channel)
     ws_data = wb.create_sheet("붙여넣기(데이터추출)")
     build_data_sheet(ws_data, rows)
     # 인쇄 설정: A4 세로, 여백 최소, 열 폭 맞춤
