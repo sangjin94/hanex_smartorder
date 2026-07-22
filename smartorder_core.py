@@ -221,6 +221,62 @@ def skip_product_master(sid=None):
     return bool(s.get("skip_pm"))
 
 
+# ----------------------------------------------------------------------------
+# 정렬 설정 (화주사별)
+# ----------------------------------------------------------------------------
+# 라벨 정렬(부착양식·인쇄·폼텍 공통) 필드: key -> (표시명, row에서 정렬값 뽑는 함수)
+# row는 process()가 만든 dict. 'qty_desc'만 수량 내림차순(음수), 나머지는 문자열 오름차순.
+LABEL_SORT_FIELDS = {
+    "cat":    "구분(대월/프리미엄)",
+    "rep":    "상품명(한익스)",
+    "hub":    "이고센터",
+    "center": "채널센터",
+    "store":  "점포명",
+    "qty_desc": "수량 많은순",
+}
+DEFAULT_LABEL_SORT = ["cat", "rep", "hub", "center", "store"]   # 기존 동작
+COVER_SORT_FIELDS = {"name": "이름 오름차순", "qty_desc": "수량 많은순"}
+DEFAULT_COVER_SORT = "name"
+
+
+def get_label_sort(sid=None):
+    """라벨 정렬 순위 목록(부착양식·폼텍 공통). 유효 키만, 없으면 기본값."""
+    s = load_shippers().get(sid or _cur_shipper, {})
+    seq = s.get("sort", {}).get("label") if isinstance(s.get("sort"), dict) else None
+    if isinstance(seq, list):
+        seq = [k for k in seq if k in LABEL_SORT_FIELDS]
+        if seq:
+            return seq
+    return list(DEFAULT_LABEL_SORT)
+
+
+def get_cover_sort(sid=None):
+    s = load_shippers().get(sid or _cur_shipper, {})
+    v = s.get("sort", {}).get("cover") if isinstance(s.get("sort"), dict) else None
+    return v if v in COVER_SORT_FIELDS else DEFAULT_COVER_SORT
+
+
+def _label_sort_key(row, seq, cats, dc):
+    """설정된 순위대로 정렬 튜플 생성. row는 process() dict 또는 labelout용 dict."""
+    def field(k):
+        if k == "cat":
+            c = row.get("구분") or dc
+            return cats.index(c) if c in cats else 9
+        if k == "rep":
+            return norm(row.get("대표") or row.get("상품명") or "")
+        if k == "hub":
+            return norm(row.get("거점센터") or "") or "￿"   # 미지정은 맨 뒤
+        if k == "center":
+            return norm(row.get("센터") or "")
+        if k == "store":
+            return norm(row.get("점포명") or "")
+        if k == "qty_desc":
+            q = row.get("수량")
+            return -q if isinstance(q, (int, float)) else 0
+        return ""
+    return tuple(field(k) for k in seq)
+
+
 def product_rep_cat(pm, code):
     """상품마스터에서 (대표=한익스상품명, 구분) 반환. 값이 문자열이면 레거시(구분=첫 번째 구분).
     미등록이면 (None, None)."""
@@ -735,15 +791,9 @@ def missing_reps(rows):
 
 
 def sort_rows(rows):
-    """대표(한익스상품명) → 거점센터(배송센터) → 채널센터 → 점포명 순 정렬."""
-    pcats = get_cats()
-    def catkey(c):
-        return pcats.index(c) if c in pcats else 9
-    return sorted(rows, key=lambda x: (catkey(x.get("구분") or get_default_cat()),
-                                       x["대표"] or x["상품명"] or "",
-                                       x["거점센터"] or "zzz",
-                                       x["센터"] or "",
-                                       x["점포명"] or ""))
+    """화주사별 라벨 정렬 설정 순서대로(부착양식·인쇄 공통). 기본: 구분→상품명→이고센터→채널센터→점포명."""
+    seq, cats, dc = get_label_sort(), get_cats(), get_default_cat()
+    return sorted(rows, key=lambda x: _label_sort_key(x, seq, cats, dc))
 
 
 REP_COL = "상품명(대표)"   # 라벨출력(폼텍) 시트의 한익스상품명 컬럼명
@@ -807,15 +857,16 @@ def labelout_grid(path, channel, sheet=None):
         cells = list(r) + [None] * (ncol - len(r))
         cells[hub_i] = hub
         cells[rep_i] = rep or ""
-        out.append({"cells": cells[:ncol], "_cat": cat or get_default_cat(),
-                    "_rep": rep or pname, "_prod": pname, "_hub": hub, "_center": cname,
-                    "_store": g(r, "store_name") or cname})
+        # 라벨 정렬 설정을 부착양식과 똑같이 쓰기 위해 process()와 같은 표준 키를 함께 보관
+        out.append({"cells": cells[:ncol],
+                    "구분": cat or get_default_cat(),
+                    "대표": rep or "", "상품명": pname,
+                    "거점센터": hub, "센터": cname,
+                    "점포명": g(r, "store_name") or cname,
+                    "수량": to_int(g(r, "qty")) if g(r, "qty") else ""})
 
-    pcats = get_cats()
-    def catkey(c):
-        return pcats.index(c) if c in pcats else 9
-    out.sort(key=lambda x: (catkey(x["_cat"]), x["_rep"] or x["_prod"] or "",
-                            x["_hub"] or "zzz", x["_center"] or "", x["_store"] or ""))
+    seq, cats, dc = get_label_sort(), get_cats(), get_default_cat()
+    out.sort(key=lambda x: _label_sort_key(x, seq, cats, dc))
     return headers, [x["cells"] for x in out]
 
 
@@ -845,7 +896,7 @@ def build_labelout_sheet(ws, headers, rows):
 
 
 def compute_totals(rows):
-    """TOTAL 표지용 집계: 상품(대표)별 수량, 거점센터별 수량. (이름 오름차순)"""
+    """TOTAL 표지용 집계: 상품(대표)별 수량, 거점센터별 수량. 화주사별 표지 정렬 설정 적용."""
     prod, hub = {}, {}
     for row in rows:
         q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
@@ -853,9 +904,11 @@ def compute_totals(rows):
             prod[row["대표"]] = prod.get(row["대표"], 0) + q
         if row["거점센터"]:
             hub[row["거점센터"]] = hub.get(row["거점센터"], 0) + q
-    prod_list = sorted(prod.items())
-    hub_list = sorted(hub.items())
-    return prod_list, hub_list
+    if get_cover_sort() == "qty_desc":
+        key = lambda kv: (-kv[1], kv[0])   # 수량 많은순(동수는 이름)
+    else:
+        key = lambda kv: kv[0]             # 이름 오름차순
+    return sorted(prod.items(), key=key), sorted(hub.items(), key=key)
 
 # ----------------------------------------------------------------------------
 # 스타일 (기존 부착양식과 동일)
@@ -978,15 +1031,9 @@ def build_data_sheet(ws, rows):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 def build_total_sheet(ws, rows, cfg):
-    from collections import OrderedDict
-    prod = OrderedDict()
-    hub = OrderedDict()
-    for row in rows:
-        q = row["수량"] if isinstance(row["수량"], (int, float)) else 0
-        if row["대표"]:   # 표지 상품명은 항상 한익스상품명(대표)만
-            prod[row["대표"]] = prod.get(row["대표"], 0) + q
-        if row["거점센터"]:
-            hub[row["거점센터"]] = hub.get(row["거점센터"], 0) + q
+    # 화면 표지와 같은 집계·정렬(화주사별 표지 정렬 설정) 사용
+    prod_list, hub_list = compute_totals(rows)
+    prod, hub = dict(prod_list), dict(hub_list)
     ws.cell(1, 2, cover_title(cfg, rows)).font = Font(name=FONT, size=14, bold=True)
     hdr = ["번호", "상품", "수량"]
     for i, h in enumerate(hdr):
@@ -1003,11 +1050,11 @@ def build_total_sheet(ws, rows, cfg):
             c.fill = sum_fill
 
     r = 3
-    for i, (k, v) in enumerate(sorted(prod.items()), 1):   # 이름 오름차순
+    for i, (k, v) in enumerate(prod_list, 1):              # compute_totals가 정렬 적용
         ws.cell(r, 2, i); ws.cell(r, 3, k); ws.cell(r, 4, v); r += 1
     _sum_row(r, 3, 4, sum(prod.values()))                  # 상품 수량 합계
     r = 3
-    for k, v in sorted(hub.items()):
+    for k, v in hub_list:
         ws.cell(r, 6, k); ws.cell(r, 7, v); r += 1
     _sum_row(r, 6, 7, sum(hub.values()))                   # 이고수량 합계
     for col, w in {"B": 6, "C": 34, "D": 8, "E": 3, "F": 16, "G": 10}.items():

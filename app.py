@@ -719,7 +719,35 @@ def masters():
     return render_template("masters.html", defs=MASTER_DEFS, counts=counts,
                            skip_pm=sc.skip_product_master(),
                            center_colors=center_colors,
-                           channels=CH_ORDER, channel_cfg=sc.CHANNELS)
+                           channels=CH_ORDER, channel_cfg=sc.CHANNELS,
+                           label_sort=sc.get_label_sort(), cover_sort=sc.get_cover_sort(),
+                           label_sort_fields=sc.LABEL_SORT_FIELDS,
+                           cover_sort_fields=sc.COVER_SORT_FIELDS)
+
+
+@app.route("/masters/sort/save", methods=["POST"])
+def sort_save():
+    """현재 화주사의 출력 정렬 설정 저장 (라벨=부착양식·폼텍 공통, 표지)."""
+    shippers = sc.load_shippers()
+    sid = sc.get_shipper()
+    if sid not in shippers:
+        abort(404)
+    # 라벨 정렬: 순위 드롭다운(pri1..priN) 순서대로, 중복·빈값 제거
+    seq, seen = [], set()
+    for k in request.form.getlist("label_pri"):
+        k = k.strip()
+        if k in sc.LABEL_SORT_FIELDS and k not in seen:
+            seq.append(k); seen.add(k)
+    cover = request.form.get("cover", sc.DEFAULT_COVER_SORT)
+    if cover not in sc.COVER_SORT_FIELDS:
+        cover = sc.DEFAULT_COVER_SORT
+    conf = shippers[sid].get("sort") if isinstance(shippers[sid].get("sort"), dict) else {}
+    conf["label"] = seq or list(sc.DEFAULT_LABEL_SORT)
+    conf["cover"] = cover
+    shippers[sid]["sort"] = conf
+    sc.save_shippers(shippers)
+    flash("정렬 설정을 저장했습니다.", "ok")
+    return redirect(url_for("masters"))
 
 
 @app.route("/masters/<which>", methods=["GET"])
