@@ -18,20 +18,44 @@
    "바카디"
   ],
   "name": "바카디",
-  "skip_pm": true
+  "skip_pm": true,
+  "sort": {
+   "cover": "name",
+   "label": [
+    "hub",
+    "center",
+    "store"
+   ]
+  }
  },
  "sdnp01": {
   "cats": [
    "디앤피"
   ],
   "name": "디앤피 스피리츠",
-  "skip_pm": true
+  "skip_pm": true,
+  "sort": {
+   "cover": "name",
+   "label": [
+    "hub",
+    "center",
+    "store"
+   ]
+  }
  },
  "swgs01": {
   "cats": [
    "윌리엄"
   ],
   "name": "윌리엄그랜트앤선즈",
-  "skip_pm": true
+  "skip_pm": true,
+  "sort": {
+   "cover": "name",
+   "label": [
+    "hub",
+    "center",
+    "store"
+   ]
+  }
  }
 }
